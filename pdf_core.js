@@ -905,15 +905,16 @@
             const wObj = dict.get(PDFName.of('Width'));
             const hObj = dict.get(PDFName.of('Height'));
             const filter = dict.get(PDFName.of('Filter'));
+            if (!filter || !filter.toString().includes('FlateDecode')) {
+              continue;
+            }
             if (wObj && hObj && typeof wObj.asNumber === 'function' && typeof hObj.asNumber === 'function') {
               const width = wObj.asNumber();
               const height = hObj.asNumber();
               if (width > 60 && height > 60) {
                 try {
                   const rawContents = obj.getContents();
-                  const decompressed = (filter && filter.toString().includes('FlateDecode'))
-                    ? zlibMod.inflateSync(rawContents)
-                    : rawContents;
+                  const decompressed = zlibMod.inflateSync(rawContents);
                   
                   const channels = decompressed.length >= width * height * 4 ? 4 : (decompressed.length >= width * height * 3 ? 3 : 1);
                   const scaleDiv = level === 'extreme' ? 3 : 2;
@@ -1791,8 +1792,8 @@
       throw new Error('Both PDF documents (A and B) are required for comparison.');
     }
 
-    const bytesA = pdfBytesA instanceof Uint8Array ? pdfBytesA.slice() : new Uint8Array(pdfBytesA);
-    const bytesB = pdfBytesB instanceof Uint8Array ? pdfBytesB.slice() : new Uint8Array(pdfBytesB);
+    const bytesA = pdfBytesA instanceof Uint8Array ? pdfBytesA.slice() : new Uint8Array(pdfBytesA).slice();
+    const bytesB = pdfBytesB instanceof Uint8Array ? pdfBytesB.slice() : new Uint8Array(pdfBytesB).slice();
 
     let pdfjs = null;
     if (typeof window !== 'undefined' && window.pdfjsLib) {
@@ -1835,6 +1836,9 @@
         pdfLibDocB = await PDFDocument.load(bytesB, { ignoreEncryption: true });
         if (!numPagesB) numPagesB = pdfLibDocB.getPageCount();
       } catch (e) {}
+      if (numPagesA === 0 && numPagesB === 0) {
+        throw new Error('Failed to parse either PDF document for comparison. Ensure both files are valid PDFs.');
+      }
 
       const maxPages = Math.max(numPagesA, numPagesB);
       const diffPages = [];

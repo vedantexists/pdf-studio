@@ -459,9 +459,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function cleanupWorkspaceCustomContainers() {
     const signExisting = document.getElementById('signPreviewContainer');
-    if (signExisting) signExisting.remove();
+    if (signExisting && signExisting.parentNode) signExisting.parentNode.removeChild(signExisting);
     const cropExisting = document.getElementById('cropPreviewContainer');
-    if (cropExisting) cropExisting.remove();
+    if (cropExisting && cropExisting.parentNode) cropExisting.parentNode.removeChild(cropExisting);
   }
 
   function removeSignPreview() {
@@ -489,11 +489,16 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function openTool(toolKey) {
-    await cleanupActivePdfDocs();
     if (!TOOLS[toolKey]) {
       console.warn(`Tool "${toolKey}" is not recognized.`);
       return;
     }
+
+    // Switch views immediately so UI responds with zero delay
+    dashboardView.style.display = 'none';
+    workspaceView.style.display = 'block';
+
+    cleanupActivePdfDocs().catch(() => {});
     currentTool = toolKey;
     uploadedFiles = [];
     activePages = [];
@@ -669,6 +674,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  // Global delegation ensuring any card click reliably routes to openTool
+  document.addEventListener('click', (e) => {
+    const card = e.target.closest('.tool-card');
+    if (card && card.dataset && card.dataset.tool) {
+      openTool(card.dataset.tool);
+    }
+  });
+
   backBtn.addEventListener('click', showDashboard);
   homeLogoBtn.addEventListener('click', showDashboard);
   homeLogoBtn.addEventListener('keydown', (e) => {
@@ -685,7 +698,7 @@ document.addEventListener('DOMContentLoaded', () => {
       openCameraScanner();
       return;
     }
-    if (TOOL_METADATA[currentTool].acceptImages) {
+    if (TOOL_METADATA[currentTool]?.acceptImages) {
       imgFileInput.click();
     } else {
       pdfFileInput.click();
@@ -693,7 +706,11 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   dropzone.addEventListener('click', () => {
-    if (TOOL_METADATA[currentTool].acceptImages) {
+    if (currentTool === 'scan-to-pdf' || currentTool === 'scan') {
+      openCameraScanner();
+      return;
+    }
+    if (TOOL_METADATA[currentTool]?.acceptImages) {
       imgFileInput.click();
     } else {
       pdfFileInput.click();
@@ -1520,6 +1537,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     for (let i = 0; i < total; i++) {
       const pageData = activePages[i];
+      if (!pageData) continue;
       const isOrganize = currentTool === 'organize';
       const isRotate = currentTool === 'rotate';
       const isRemovePages = currentTool === 'remove-pages';
@@ -2749,6 +2767,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const fileB = uploadedFiles[1].bytes.slice();
         const result = await PDFCore.comparePDF(fileA, fileB);
         const diffPages = result.diffPages || [];
+        if (!diffPages || diffPages.length === 0) {
+          throw new Error('Failed to parse either PDF document for comparison. Ensure both files are valid PDFs.');
+        }
         const modifiedPages = diffPages.filter(p => p.diffPixels > 0).length;
         const totalDiff = result.totalDiffPixels !== undefined ? result.totalDiffPixels : diffPages.reduce((s, p) => s + p.diffPixels, 0);
         const avgDiff = diffPages.length > 0
