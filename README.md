@@ -1,4 +1,4 @@
-# PDFForge - Fast, Zero-Upload Client-Side PDF Studio
+# PDF-Studio - Fast, Zero-Upload Client-Side PDF tool
 
 > **100% private, in-browser PDF manipulation suite. Zero server uploads.**
 
