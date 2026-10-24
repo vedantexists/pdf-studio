@@ -10,6 +10,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const backBtn = document.getElementById('backBtn');
   const toolCards = document.querySelectorAll('.tool-card');
 
+  const mobileMenuToggle = document.getElementById('mobileMenuToggle');
+  const mobileDrawer = document.getElementById('mobileDrawer');
+  const drawerOverlay = document.getElementById('drawerOverlay');
+  const drawerCloseBtn = document.getElementById('drawerCloseBtn');
+  const dropdownToggles = document.querySelectorAll('.nav-dropdown-toggle');
+
   const activeToolIcon = document.getElementById('activeToolIcon');
   const activeToolTitle = document.getElementById('activeToolTitle');
   const dropzone = document.getElementById('dropzone');
@@ -33,72 +39,192 @@ document.addEventListener('DOMContentLoaded', () => {
   let activePages = [];   // Array<{ pageNum: number, rotation: number, isDeleted: boolean }>
   let isProcessing = false;
 
-  const TOOL_METADATA = {
+  // Complete Tools Registry
+  const TOOLS = {
     'merge': {
       title: 'Merge PDF',
       icon: '⤯',
       actionText: 'Merge PDF',
+      accept: '.pdf,application/pdf',
       acceptImages: false,
+      maxFiles: Infinity,
       multiple: true,
-      description: 'Combine multiple PDFs in your desired order.',
+      description: 'Combine multiple PDFs into one unified document in any order you choose.',
     },
     'split': {
       title: 'Split PDF',
       icon: '✂',
       actionText: 'Split PDF',
+      accept: '.pdf,application/pdf',
       acceptImages: false,
+      maxFiles: 1,
       multiple: false,
-      description: 'Extract individual pages or ranges from your PDF.',
+      description: 'Separate one page, custom ranges, or extract all pages into individual files.',
     },
     'organize': {
       title: 'Organize PDF',
       icon: '☷',
       actionText: 'Save Organized PDF',
+      accept: '.pdf,application/pdf',
       acceptImages: false,
+      maxFiles: 1,
       multiple: false,
-      description: 'Reorder, delete, and rotate pages with visual thumbnails.',
+      description: 'Sort, delete, and rotate pages visually with an interactive page thumbnail grid.',
     },
     'rotate': {
       title: 'Rotate PDF',
       icon: '↻',
       actionText: 'Save Rotated PDF',
+      accept: '.pdf,application/pdf',
       acceptImages: false,
+      maxFiles: 1,
       multiple: false,
-      description: 'Rotate all or specific pages clockwise or counter-clockwise.',
+      description: 'Rotate your PDF pages 90°, 180°, or 270° clockwise or counter-clockwise.',
     },
     'pdf-to-img': {
       title: 'PDF to JPG / PNG',
       icon: '🖼',
       actionText: 'Convert to Images',
+      accept: '.pdf,application/pdf',
       acceptImages: false,
+      maxFiles: 1,
       multiple: false,
-      description: 'Convert PDF pages into high-resolution images.',
+      description: 'Convert each page of a PDF into high-quality images and download them or get a ZIP.',
     },
     'img-to-pdf': {
       title: 'JPG / PNG to PDF',
       icon: '📄',
       actionText: 'Convert to PDF',
+      accept: 'image/jpeg,image/png,image/webp',
       acceptImages: true,
+      maxFiles: Infinity,
       multiple: true,
-      description: 'Convert your image files into a single clean PDF document.',
+      description: 'Convert images to PDF in seconds. Easily adjust orientation and margins.',
     },
     'watermark': {
       title: 'Watermark PDF',
       icon: '✎',
       actionText: 'Apply Watermark',
+      accept: '.pdf,application/pdf',
       acceptImages: false,
+      maxFiles: 1,
       multiple: false,
-      description: 'Add a custom text watermark with typography and transparency options.',
+      description: 'Stamp custom text over your PDF. Choose typography, transparency, angle and color.',
     },
     'page-numbers': {
       title: 'Page Numbers',
       icon: '🔢',
       actionText: 'Add Page Numbers',
+      accept: '.pdf,application/pdf',
       acceptImages: false,
+      maxFiles: 1,
       multiple: false,
-      description: 'Insert automatic page numbering into your document.',
+      description: 'Add sequential page numbers to all pages with customizable positioning.',
+    },
+    'sign': {
+      title: 'Sign PDF',
+      icon: '✍️',
+      actionText: 'Sign & Download',
+      accept: '.pdf,application/pdf',
+      acceptImages: false,
+      maxFiles: 1,
+      multiple: false,
+      description: 'Create drawn, typed, or uploaded signatures and stamp them onto document pages.',
+    },
+    'unlock': {
+      title: 'Unlock PDF',
+      icon: '🔓',
+      actionText: 'Unlock PDF',
+      accept: '.pdf,application/pdf',
+      acceptImages: false,
+      maxFiles: 1,
+      multiple: false,
+      description: 'Remove PDF password security and permissions restrictions in memory.',
+    },
+    'protect': {
+      title: 'Protect PDF',
+      icon: '🔒',
+      actionText: 'Protect PDF',
+      accept: '.pdf,application/pdf',
+      acceptImages: false,
+      maxFiles: 1,
+      multiple: false,
+      description: 'Encrypt PDF files with robust user passwords and configurable document permissions.',
+    },
+    'crop': {
+      title: 'Crop PDF',
+      icon: '✂️',
+      actionText: 'Crop & Save',
+      accept: '.pdf,application/pdf',
+      acceptImages: false,
+      maxFiles: 1,
+      multiple: false,
+      description: 'Trim page margins or specify exact crop boundaries with interactive visual preview.',
+    },
+    'forms': {
+      title: 'PDF Forms',
+      icon: '📝',
+      actionText: 'Save Form',
+      accept: '.pdf,application/pdf',
+      acceptImages: false,
+      maxFiles: 1,
+      multiple: false,
+      description: 'Inspect and fill interactive form fields with options to save or permanently flatten.',
+    },
+    'remove-pages': {
+      title: 'Remove Pages',
+      icon: '🗑️',
+      actionText: 'Remove Pages',
+      accept: '.pdf,application/pdf',
+      acceptImages: false,
+      maxFiles: 1,
+      multiple: false,
+      description: 'Delete unwanted pages from your PDF while preserving catalog and form integrity.',
+    },
+    'extract-pages': {
+      title: 'Extract Pages',
+      icon: '📑',
+      actionText: 'Extract Pages',
+      accept: '.pdf,application/pdf',
+      acceptImages: false,
+      maxFiles: 1,
+      multiple: false,
+      description: 'Extract specific pages or custom ranges into a new standalone PDF or ZIP archive.',
     },
   };
+
+  // Aliases for hyphenated variants
+  TOOLS['sign-pdf'] = TOOLS['sign'];
+  TOOLS['unlock-pdf'] = TOOLS['unlock'];
+  TOOLS['protect-pdf'] = TOOLS['protect'];
+  TOOLS['crop-pdf'] = TOOLS['crop'];
+  TOOLS['pdf-forms'] = TOOLS['forms'];
+
+  // Backward compatibility & global access
+  const TOOL_METADATA = TOOLS;
+  window.TOOLS = TOOLS;
+  window.TOOL_METADATA = TOOLS;
+
+  // Category mapping for active indicator
+  const CATEGORY_MAP = {
+    'organize': ['merge', 'split', 'remove-pages', 'extract-pages', 'organize'],
+    'optimize': ['compress'],
+    'convert-to': ['pdf-to-img'],
+    'convert-from': ['img-to-pdf'],
+    'edit': ['rotate', 'page-numbers', 'watermark', 'crop', 'crop-pdf', 'forms', 'pdf-forms'],
+    'security': ['unlock', 'unlock-pdf', 'protect', 'protect-pdf', 'sign', 'sign-pdf'],
+  };
+
+  function updateActiveNavIndicator(toolKey) {
+    dropdownToggles.forEach(t => t.classList.remove('active'));
+    for (const [category, tools] of Object.entries(CATEGORY_MAP)) {
+      if (tools.includes(toolKey)) {
+        const toggle = document.querySelector(`.nav-dropdown-toggle[data-category="${category}"]`);
+        if (toggle) toggle.classList.add('active');
+        break;
+      }
+    }
+  }
 
   // --- Navigation & Routing ---
   function showDashboard() {
@@ -108,6 +234,7 @@ document.addEventListener('DOMContentLoaded', () => {
     pdfFileInput.value = '';
     imgFileInput.value = '';
     hideStatus();
+    dropdownToggles.forEach(t => t.classList.remove('active'));
 
     dashboardView.style.display = 'block';
     workspaceView.style.display = 'none';
@@ -116,6 +243,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function openTool(toolKey) {
+    if (!TOOLS[toolKey]) {
+      console.warn(`Tool "${toolKey}" is not recognized.`);
+      return;
+    }
     currentTool = toolKey;
     uploadedFiles = [];
     activePages = [];
@@ -123,7 +254,7 @@ document.addEventListener('DOMContentLoaded', () => {
     imgFileInput.value = '';
     hideStatus();
 
-    const meta = TOOL_METADATA[toolKey];
+    const meta = TOOLS[toolKey];
     activeToolTitle.textContent = meta.title;
     activeToolIcon.textContent = meta.icon;
     executeBtnText.textContent = meta.actionText;
@@ -140,7 +271,98 @@ document.addEventListener('DOMContentLoaded', () => {
     workspaceView.style.display = 'block';
     dropzone.style.display = 'block';
     workArea.style.display = 'none';
+
+    updateActiveNavIndicator(toolKey);
   }
+  window.openTool = openTool;
+
+  // Drawer & Dropdown Helpers
+  function closeMobileDrawer() {
+    if (mobileDrawer) mobileDrawer.classList.remove('is-open');
+    if (drawerOverlay) drawerOverlay.classList.remove('is-open');
+    if (mobileMenuToggle) mobileMenuToggle.setAttribute('aria-expanded', 'false');
+  }
+
+  function openMobileDrawer() {
+    if (mobileDrawer) mobileDrawer.classList.add('is-open');
+    if (drawerOverlay) drawerOverlay.classList.add('is-open');
+    if (mobileMenuToggle) mobileMenuToggle.setAttribute('aria-expanded', 'true');
+  }
+
+  function closeAllDropdowns() {
+    dropdownToggles.forEach(t => t.setAttribute('aria-expanded', 'false'));
+    document.querySelectorAll('.nav-dropdown').forEach(d => d.classList.remove('is-open'));
+  }
+
+  // Mega-menu and Mobile Drawer tool links click handlers
+  const megaMenuLinks = document.querySelectorAll('.nav-tool-link, .drawer-tool-link');
+  megaMenuLinks.forEach((link) => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      const tool = link.dataset.tool;
+      if (link.classList.contains('is-disabled') || tool === 'compress') {
+        alert('Compress PDF is coming soon! All processing is 100% client-side in your browser.');
+        closeMobileDrawer();
+        closeAllDropdowns();
+        return;
+      }
+      closeMobileDrawer();
+      closeAllDropdowns();
+      if (tool && TOOLS[tool]) {
+        openTool(tool);
+      }
+    });
+  });
+
+  // Mobile menu toggle button
+  if (mobileMenuToggle) {
+    mobileMenuToggle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isOpen = mobileDrawer && mobileDrawer.classList.contains('is-open');
+      if (isOpen) {
+        closeMobileDrawer();
+      } else {
+        openMobileDrawer();
+      }
+    });
+  }
+
+  if (drawerCloseBtn) {
+    drawerCloseBtn.addEventListener('click', closeMobileDrawer);
+  }
+
+  if (drawerOverlay) {
+    drawerOverlay.addEventListener('click', closeMobileDrawer);
+  }
+
+  // Dropdown toggles
+  dropdownToggles.forEach((toggle) => {
+    toggle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isExpanded = toggle.getAttribute('aria-expanded') === 'true';
+      closeAllDropdowns();
+      if (!isExpanded) {
+        toggle.setAttribute('aria-expanded', 'true');
+        const dropdown = toggle.nextElementSibling;
+        if (dropdown) dropdown.classList.add('is-open');
+      }
+    });
+  });
+
+  // Click outside to close dropdowns
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.nav-item')) {
+      closeAllDropdowns();
+    }
+  });
+
+  // Escape key closes dropdowns and mobile drawer
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closeAllDropdowns();
+      closeMobileDrawer();
+    }
+  });
 
   toolCards.forEach((card) => {
     const tool = card.dataset.tool;
@@ -388,7 +610,7 @@ document.addEventListener('DOMContentLoaded', () => {
             : 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
         }
         // ALWAYS pass a cloned copy to prevent worker from detaching file.bytes
-        const clonedBytes = new Uint8Array(file.bytes);
+        const clonedBytes = file.bytes.slice();
         pdfDoc = await window.pdfjsLib.getDocument({ data: clonedBytes }).promise;
       } catch (err) {
         console.warn('PDF.js thumbnail engine unavailable, using fallback cards:', err);
@@ -693,6 +915,70 @@ document.addEventListener('DOMContentLoaded', () => {
           </label>
         </div>
       `;
+    } else if (currentTool === 'remove-pages') {
+      toolSettings.innerHTML = `
+        <div class="setting-group">
+          <label for="removePagesInput">Pages to Remove</label>
+          <input type="text" id="removePagesInput" placeholder="e.g. 1, 3-5">
+          <p class="setting-hint">Enter comma-separated page numbers or ranges to remove.</p>
+        </div>
+      `;
+    } else if (currentTool === 'extract-pages') {
+      toolSettings.innerHTML = `
+        <div class="setting-group">
+          <label for="extractPagesInput">Pages to Extract</label>
+          <input type="text" id="extractPagesInput" placeholder="e.g. 1, 3-5">
+          <p class="setting-hint">Enter page ranges to extract into a new standalone PDF.</p>
+        </div>
+      `;
+    } else if (currentTool === 'crop' || currentTool === 'crop-pdf') {
+      toolSettings.innerHTML = `
+        <div class="setting-group">
+          <label>Crop Scope</label>
+          <div class="radio-group">
+            <label class="radio-option">
+              <input type="radio" name="cropScope" value="all" checked>
+              <span>Apply to all pages</span>
+            </label>
+            <label class="radio-option">
+              <input type="radio" name="cropScope" value="current">
+              <span>Apply to current page only</span>
+            </label>
+          </div>
+        </div>
+      `;
+    } else if (currentTool === 'forms' || currentTool === 'pdf-forms') {
+      toolSettings.innerHTML = `
+        <div class="setting-group">
+          <label>Form Fields</label>
+          <div id="formFieldsContainer">
+            <p class="setting-hint">Interactive form controls will appear here.</p>
+          </div>
+        </div>
+      `;
+    } else if (currentTool === 'unlock' || currentTool === 'unlock-pdf') {
+      toolSettings.innerHTML = `
+        <div class="setting-group">
+          <label for="unlockPasswordInput">Document Password</label>
+          <input type="password" id="unlockPasswordInput" placeholder="Optional for restricted permissions">
+          <p class="setting-hint">Leave blank if the document only has permission locks.</p>
+        </div>
+      `;
+    } else if (currentTool === 'protect' || currentTool === 'protect-pdf') {
+      toolSettings.innerHTML = `
+        <div class="setting-group">
+          <label for="protectPasswordInput">Set Password</label>
+          <input type="password" id="protectPasswordInput" placeholder="Enter password to protect PDF">
+          <p class="setting-hint">This password will be required to open the document.</p>
+        </div>
+      `;
+    } else if (currentTool === 'sign' || currentTool === 'sign-pdf') {
+      toolSettings.innerHTML = `
+        <div class="setting-group">
+          <label>Signature Options</label>
+          <p class="setting-hint">Create, type, or upload your signature to place on pages.</p>
+        </div>
+      `;
     }
   }
 
@@ -889,6 +1175,44 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         downloadFile(numberedBytes, 'numbered.pdf', 'application/pdf');
         showSuccess('Page numbers added successfully!');
+      } else if (currentTool === 'extract-pages') {
+        const srcBytes = uploadedFiles[0].bytes.slice();
+        const total = uploadedFiles[0].pageCount || 1;
+        const inputVal = (document.getElementById('extractPagesInput')?.value || '').trim();
+        let indices = inputVal ? PDFCore.parsePageRanges(inputVal, total) : Array.from({ length: total }, (_, i) => i);
+        const extractedBytes = await PDFCore.extractPages(srcBytes, indices);
+        downloadFile(extractedBytes, 'extracted.pdf', 'application/pdf');
+        showSuccess('Pages extracted successfully!');
+      } else if (currentTool === 'remove-pages') {
+        const srcBytes = uploadedFiles[0].bytes.slice();
+        const total = uploadedFiles[0].pageCount || 1;
+        const inputVal = (document.getElementById('removePagesInput')?.value || '').trim();
+        let indicesToRemove = inputVal ? PDFCore.parsePageRanges(inputVal, total) : [];
+        if (PDFCore.removePages) {
+          const resultBytes = await PDFCore.removePages(srcBytes, indicesToRemove);
+          downloadFile(resultBytes, 'removed_pages.pdf', 'application/pdf');
+          showSuccess('Pages removed successfully!');
+        } else {
+          const toKeep = Array.from({ length: total }, (_, i) => i).filter((i) => !indicesToRemove.includes(i));
+          const resultBytes = await PDFCore.extractPages(srcBytes, toKeep);
+          downloadFile(resultBytes, 'removed_pages.pdf', 'application/pdf');
+          showSuccess('Pages removed successfully!');
+        }
+      } else if (['sign', 'sign-pdf', 'unlock', 'unlock-pdf', 'protect', 'protect-pdf', 'crop', 'crop-pdf', 'forms', 'pdf-forms'].includes(currentTool)) {
+        const srcBytes = uploadedFiles[0].bytes.slice();
+        if (currentTool.startsWith('unlock') && PDFCore.unlockPDF) {
+          const pass = document.getElementById('unlockPasswordInput')?.value || '';
+          const res = await PDFCore.unlockPDF(srcBytes, pass);
+          downloadFile(res, 'unlocked.pdf', 'application/pdf');
+          showSuccess('PDF unlocked successfully!');
+        } else if (currentTool.startsWith('protect') && PDFCore.protectPDF) {
+          const pass = document.getElementById('protectPasswordInput')?.value || '';
+          const res = await PDFCore.protectPDF(srcBytes, { userPassword: pass });
+          downloadFile(res, 'protected.pdf', 'application/pdf');
+          showSuccess('PDF protected successfully!');
+        } else {
+          showStatus(`Processing ready for ${TOOLS[currentTool].title}.`, 'processing');
+        }
       }
     } catch (err) {
       console.error(err);

@@ -14,7 +14,8 @@
   <script>
     window.addEventListener('DOMContentLoaded', () => {
       if (window.pdfjsLib && !window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
-        window.pdfjsLib.GlobalWorkerOptions.workerSrc = window.location.protocol.startsWith('http')
+        const isLocalDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = isLocalDev
           ? 'node_modules/pdfjs-dist/build/pdf.worker.min.js'
           : 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
       }
