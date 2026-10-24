@@ -42,7 +42,7 @@
 |---|------|-------|-------------|--------|
 | M-E2E | E2E Testing Track | Author `test/test_phase4_audit.js` covering Tiers 1-4 for all R1-R5 features, publish `TEST_READY.md` | none | IN_PROGRESS |
 | M1 | Audit Remediation & Core Hardening | R1 items: text operator stripping in `redactPDF`, wire 7 tools, unlock cipher guard, latin1 decoder, repair XRef masking, PDF.js destroy, DOM selection, dead code cleanup | none | DONE |
-| M2 | Core Optimization & Security | R2 items: in-browser `compressPDF` with OffscreenCanvas JPEG downsampling, `comparePDF` dual-canvas diffing | M1 | IN_PROGRESS |
+| M2 | Core Optimization & Security | R2 items: in-browser `compressPDF` with OffscreenCanvas JPEG downsampling, `comparePDF` dual-canvas diffing | M1 | DONE |
 | M3 | Document Editing, Capture & OCR | R3 items: `scan-to-pdf` (camera + filters), `edit-pdf` (canvas annotations), `ocr-pdf` (`tesseract.js` WASM searchable layer) | M1 | PLANNED |
 | M4 | Office & Standards Conversions | R4 items: Word to PDF (`mammoth`), Excel to PDF (`xlsx`), PDF to Word (`docx`), PDF to PPT (`pptxgenjs`), PDF to PDF/A | M1 | PLANNED |
 | M5 | 6-Column Mega-Menu UI Refresh | R5 items: `index.html` & `style.css` 6-column mega-nav, 30-card grid, mobile drawer, workspace panels | M1-M4 | PLANNED |

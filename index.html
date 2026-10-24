@@ -745,7 +745,13 @@
           <video id="scanVideo" autoplay playsinline style="width: 100%; max-height: 360px; object-fit: contain;"></video>
           <canvas id="scanCaptureCanvas" style="display: none;"></canvas>
         </div>
-        <div style="display: flex; gap: 0.5rem; justify-content: center; margin-top: 0.75rem;">
+        <div style="display: flex; gap: 0.5rem; justify-content: center; align-items: center; margin-top: 0.75rem; flex-wrap: wrap;">
+          <label for="scanFilterSelect" style="font-size: 0.85rem; font-weight: 600; color: var(--text-muted);">Filter:</label>
+          <select id="scanFilterSelect" class="form-select" style="max-width: 220px; padding: 0.4rem 0.6rem; font-size: 0.85rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-main);">
+            <option value="color">Normal / Color</option>
+            <option value="contrast">Enhanced Auto-Contrast</option>
+            <option value="bw">B&W Document Scan (Otsu)</option>
+          </select>
           <button type="button" class="primary-btn" id="scanCaptureBtn">📸 Capture Page</button>
           <button type="button" class="secondary-btn" id="scanSwitchCameraBtn">🔄 Switch Camera</button>
         </div>

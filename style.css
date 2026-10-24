@@ -852,6 +852,115 @@ body {
 .crop-handle.handle-w { top: calc(50% - 5px); left: -5px; cursor: ew-resize; }
 .crop-handle.handle-e { top: calc(50% - 5px); right: -5px; cursor: ew-resize; }
 
+/* Interactive Edit PDF Workspace & Annotation Overlay */
+.edit-preview-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+}
+
+.edit-page-nav {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.edit-page-wrapper {
+  position: relative;
+  display: inline-block;
+  background: #ffffff;
+  box-shadow: var(--shadow-md);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  user-select: none;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.edit-page-wrapper canvas {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.edit-annotation-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+  touch-action: none;
+  z-index: 10;
+}
+
+.edit-tools-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.4rem;
+  margin-bottom: 0.8rem;
+}
+
+.edit-tool-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  padding: 0.5rem 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  color: var(--text-main);
+}
+
+.edit-tool-btn:hover {
+  background: var(--primary-light);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.edit-tool-btn.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #ffffff;
+  box-shadow: var(--shadow-sm);
+}
+
+.edit-color-palette {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-top: 0.35rem;
+}
+
+.edit-color-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+
+.edit-color-swatch:hover {
+  transform: scale(1.15);
+}
+
+.edit-color-swatch.active {
+  box-shadow: 0 0 0 2px var(--primary);
+}
+
 /* PDF Forms Field List Styles */
 .form-fields-list {
   display: flex;

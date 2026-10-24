@@ -5,7 +5,7 @@
   "main": "app.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node test/test_core.js && node test/test_phase1.js && node test/test_phase2.js && node test/test_phase3.js && node test/test_phase4_audit.js --conditional",
+    "test": "node test/test_core.js && node test/test_phase1.js && node test/test_phase2.js && node test/test_phase3.js && node test/test_adversarial_challenger_m2_3.js && node test/test_phase4_audit.js --conditional",
     "test:audit": "node test/test_phase4_audit.js"
   },
   "keywords": [

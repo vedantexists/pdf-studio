@@ -430,6 +430,7 @@ document.addEventListener('DOMContentLoaded', () => {
   TOOLS['protect-pdf'] = TOOLS['protect'];
   TOOLS['crop-pdf'] = TOOLS['crop'];
   TOOLS['pdf-forms'] = TOOLS['forms'];
+  TOOLS['edit'] = TOOLS['edit-pdf'];
 
   // Backward compatibility & global access
   const TOOL_METADATA = TOOLS;
@@ -462,6 +463,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (signExisting && signExisting.parentNode) signExisting.parentNode.removeChild(signExisting);
     const cropExisting = document.getElementById('cropPreviewContainer');
     if (cropExisting && cropExisting.parentNode) cropExisting.parentNode.removeChild(cropExisting);
+    const editExisting = document.getElementById('editPreviewContainer');
+    if (editExisting && editExisting.parentNode) editExisting.parentNode.removeChild(editExisting);
   }
 
   function removeSignPreview() {
@@ -478,6 +481,9 @@ document.addEventListener('DOMContentLoaded', () => {
     imgFileInput.value = '';
     currentSignatureDataUrl = null;
     signCurrentPageIndex = 0;
+    editCurrentPageIndex = 0;
+    editAnnotationsByPage = {};
+    isDrawingAnnotation = false;
     removeSignPreview();
     hideStatus();
     dropdownToggles.forEach(t => t.classList.remove('active'));
@@ -506,6 +512,9 @@ document.addEventListener('DOMContentLoaded', () => {
     imgFileInput.value = '';
     currentSignatureDataUrl = null;
     signCurrentPageIndex = 0;
+    editCurrentPageIndex = 0;
+    editAnnotationsByPage = {};
+    isDrawingAnnotation = false;
     removeSignPreview();
     hideStatus();
 
@@ -876,7 +885,17 @@ document.addEventListener('DOMContentLoaded', () => {
       pagesGrid.style.display = 'none';
       const signExisting = document.getElementById('signPreviewContainer');
       if (signExisting) signExisting.remove();
+      const editExisting = document.getElementById('editPreviewContainer');
+      if (editExisting) editExisting.remove();
       await renderCropPreview();
+    } else if (currentTool === 'edit-pdf' || currentTool === 'edit') {
+      filesList.style.display = 'none';
+      pagesGrid.style.display = 'none';
+      const signExisting = document.getElementById('signPreviewContainer');
+      if (signExisting) signExisting.remove();
+      const cropExisting = document.getElementById('cropPreviewContainer');
+      if (cropExisting) cropExisting.remove();
+      await renderEditPreview();
     } else {
       // Single PDF visual pages grid
       removeSignPreview();
@@ -1367,6 +1386,440 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const badge = document.getElementById('cropDimensionsBadge');
     if (badge) badge.textContent = `${pdfWpt} × ${pdfHpt} pt`;
+  }
+
+  // --- Edit PDF Interactive Annotation Workspace ---
+  let editCurrentPageIndex = 0;
+  let editAnnotationsByPage = {};
+  let currentEditTool = 'pen';
+  let currentEditColor = '#ef4444';
+  let currentEditWidth = 3;
+  let currentEditFontSize = 16;
+  let isDrawingAnnotation = false;
+  let editDrawStart = null;
+  let editCurrentStroke = [];
+
+  async function renderEditPreview() {
+    pagesGrid.style.display = 'none';
+    filesList.style.display = 'none';
+
+    let container = document.getElementById('editPreviewContainer');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'editPreviewContainer';
+      container.className = 'edit-preview-container';
+      document.getElementById('itemsContainer').appendChild(container);
+    }
+
+    const file = uploadedFiles[0];
+    const totalPages = file ? file.pageCount || 1 : 1;
+    if (editCurrentPageIndex >= totalPages) editCurrentPageIndex = 0;
+
+    container.innerHTML = `
+      <div class="edit-page-nav">
+        <button type="button" class="secondary-btn" id="editPrevPageBtn" ${editCurrentPageIndex === 0 ? 'disabled style="opacity:0.4;"' : ''}>← Prev Page</button>
+        <span id="editPageIndicator">Page ${editCurrentPageIndex + 1} of ${totalPages}</span>
+        <button type="button" class="secondary-btn" id="editNextPageBtn" ${editCurrentPageIndex >= totalPages - 1 ? 'disabled style="opacity:0.4;"' : ''}>Next Page →</button>
+      </div>
+      <div id="editPageWrapper" class="edit-page-wrapper">
+        <canvas id="editPageCanvas"></canvas>
+        <canvas id="editAnnotationCanvas" class="edit-annotation-canvas"></canvas>
+      </div>
+    `;
+
+    document.getElementById('editPrevPageBtn').addEventListener('click', async () => {
+      if (editCurrentPageIndex > 0) {
+        editCurrentPageIndex--;
+        await renderEditPreview();
+        renderSettingsPanel();
+      }
+    });
+
+    document.getElementById('editNextPageBtn').addEventListener('click', async () => {
+      if (editCurrentPageIndex < totalPages - 1) {
+        editCurrentPageIndex++;
+        await renderEditPreview();
+        renderSettingsPanel();
+      }
+    });
+
+    await renderEditPage(editCurrentPageIndex + 1);
+    redrawPageAnnotations();
+    setupEditCanvasInteractions();
+  }
+
+  async function renderEditPage(pageNum) {
+    const canvas = document.getElementById('editPageCanvas');
+    if (!canvas) return;
+    const file = uploadedFiles[0];
+    if (!file || !file.bytes) return;
+
+    if (window.pdfjsLib) {
+      let pdf = null;
+      try {
+        const loadingTask = window.pdfjsLib.getDocument({ data: file.bytes.slice() });
+        pdf = await loadingTask.promise;
+        activePdfDocs.add(pdf);
+        const page = await pdf.getPage(pageNum);
+        const viewport = page.getViewport({ scale: 1.0 });
+
+        const maxDisplayWidth = Math.min(window.innerWidth - 380, 800);
+        const scale = Math.min(maxDisplayWidth / viewport.width, 1.5);
+        const scaledViewport = page.getViewport({ scale });
+
+        canvas.width = scaledViewport.width;
+        canvas.height = scaledViewport.height;
+        currentPdfPageSize = { width: viewport.width, height: viewport.height };
+
+        const ctx = canvas.getContext('2d');
+        await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
+        return;
+      } catch (err) {
+        console.warn('PDF.js render failed for edit page, using fallback:', err);
+      } finally {
+        if (pdf && typeof pdf.destroy === 'function') {
+          try {
+            await pdf.destroy();
+            activePdfDocs.delete(pdf);
+          } catch (e) {}
+        }
+      }
+    }
+
+    // Fallback if PDF.js is unavailable
+    canvas.width = 500;
+    canvas.height = 700;
+    currentPdfPageSize = { width: 500, height: 700 };
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.strokeRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#1e293b';
+    ctx.font = 'bold 24px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`Page ${pageNum}`, 250, 350);
+  }
+
+  function redrawPageAnnotations() {
+    const annotCanvas = document.getElementById('editAnnotationCanvas');
+    const baseCanvas = document.getElementById('editPageCanvas');
+    if (!annotCanvas || !baseCanvas) return;
+
+    annotCanvas.width = baseCanvas.width;
+    annotCanvas.height = baseCanvas.height;
+    const ctx = annotCanvas.getContext('2d');
+    ctx.clearRect(0, 0, annotCanvas.width, annotCanvas.height);
+
+    const annotations = editAnnotationsByPage[editCurrentPageIndex] || [];
+    const scaleX = annotCanvas.width / (currentPdfPageSize.width || annotCanvas.width);
+    const scaleY = annotCanvas.height / (currentPdfPageSize.height || annotCanvas.height);
+    const pdfH = currentPdfPageSize.height || annotCanvas.height;
+
+    for (const ann of annotations) {
+      drawAnnotationOnCanvas(ctx, ann, scaleX, scaleY, pdfH);
+    }
+  }
+
+  function drawAnnotationOnCanvas(ctx, ann, scaleX, scaleY, pdfH) {
+    ctx.save();
+    switch (ann.type) {
+      case 'pen': {
+        if (Array.isArray(ann.points) && ann.points.length > 0) {
+          ctx.beginPath();
+          ctx.strokeStyle = ann.color || '#ef4444';
+          ctx.lineWidth = (ann.width || 2) * scaleX;
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+          const p0 = ann.points[0];
+          ctx.moveTo(p0.x * scaleX, (pdfH - p0.y) * scaleY);
+          for (let i = 1; i < ann.points.length; i++) {
+            const p = ann.points[i];
+            ctx.lineTo(p.x * scaleX, (pdfH - p.y) * scaleY);
+          }
+          ctx.stroke();
+        }
+        break;
+      }
+      case 'highlight': {
+        const cx = ann.x * scaleX;
+        const cy = (pdfH - ann.y - ann.height) * scaleY;
+        const cw = ann.width * scaleX;
+        const ch = ann.height * scaleY;
+        ctx.fillStyle = ann.color || '#fef08a';
+        ctx.globalAlpha = ann.opacity !== undefined ? ann.opacity : 0.35;
+        ctx.fillRect(cx, cy, cw, ch);
+        break;
+      }
+      case 'text': {
+        const cx = ann.x * scaleX;
+        const cy = (pdfH - ann.y) * scaleY;
+        ctx.fillStyle = ann.color || '#000000';
+        ctx.font = `${(ann.fontSize || 14) * scaleY}px sans-serif`;
+        ctx.fillText(ann.text || '', cx, cy);
+        break;
+      }
+      case 'rect': {
+        const cx = ann.x * scaleX;
+        const cy = (pdfH - ann.y - ann.height) * scaleY;
+        const cw = ann.width * scaleX;
+        const ch = ann.height * scaleY;
+        if (ann.fill && ann.color) {
+          ctx.fillStyle = ann.color;
+          ctx.globalAlpha = ann.opacity !== undefined ? ann.opacity : 1.0;
+          ctx.fillRect(cx, cy, cw, ch);
+        }
+        if (ann.borderColor || ann.borderWidth || !ann.fill) {
+          ctx.strokeStyle = ann.borderColor || ann.color || '#000000';
+          ctx.lineWidth = (ann.borderWidth || 1) * scaleX;
+          ctx.globalAlpha = ann.borderOpacity !== undefined ? ann.borderOpacity : 1.0;
+          ctx.strokeRect(cx, cy, cw, ch);
+        }
+        break;
+      }
+      case 'ellipse': {
+        const cx = (ann.x + (ann.width ? ann.width / 2 : 0)) * scaleX;
+        const cy = (pdfH - ann.y - (ann.height ? ann.height / 2 : 0)) * scaleY;
+        const rx = Math.abs((ann.width ? ann.width / 2 : 50) * scaleX);
+        const ry = Math.abs((ann.height ? ann.height / 2 : 50) * scaleY);
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+        if (ann.fill && ann.color) {
+          ctx.fillStyle = ann.color;
+          ctx.globalAlpha = ann.opacity !== undefined ? ann.opacity : 1.0;
+          ctx.fill();
+        }
+        if (ann.borderColor || ann.borderWidth || !ann.fill) {
+          ctx.strokeStyle = ann.borderColor || ann.color || '#000000';
+          ctx.lineWidth = (ann.borderWidth || 1) * scaleX;
+          ctx.globalAlpha = ann.borderOpacity !== undefined ? ann.borderOpacity : 1.0;
+          ctx.stroke();
+        }
+        break;
+      }
+      case 'line': {
+        const startX = (ann.start ? ann.start.x : (ann.x || 0)) * scaleX;
+        const startY = (pdfH - (ann.start ? ann.start.y : (ann.y || 0))) * scaleY;
+        const endX = (ann.end ? ann.end.x : ((ann.x || 0) + (ann.width || 100))) * scaleX;
+        const endY = (pdfH - (ann.end ? ann.end.y : ((ann.y || 0) + (ann.height || 0)))) * scaleY;
+        ctx.beginPath();
+        ctx.strokeStyle = ann.color || '#000000';
+        ctx.lineWidth = (ann.width || 1) * scaleX;
+        ctx.moveTo(startX, startY);
+        ctx.lineTo(endX, endY);
+        ctx.stroke();
+        break;
+      }
+    }
+    ctx.restore();
+  }
+
+  function setupEditCanvasInteractions() {
+    const annotCanvas = document.getElementById('editAnnotationCanvas');
+    if (!annotCanvas) return;
+
+    annotCanvas.onpointerdown = (e) => {
+      e.preventDefault();
+      annotCanvas.setPointerCapture(e.pointerId);
+      const rect = annotCanvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      const scaleX = (currentPdfPageSize.width || annotCanvas.width) / annotCanvas.width;
+      const scaleY = (currentPdfPageSize.height || annotCanvas.height) / annotCanvas.height;
+      const pdfH = currentPdfPageSize.height || annotCanvas.height;
+
+      const pdfX = x * scaleX;
+      const pdfY = pdfH - (y * scaleY);
+
+      if (currentEditTool === 'text') {
+        const text = prompt('Enter annotation text:');
+        if (text && text.trim()) {
+          const ann = {
+            type: 'text',
+            x: Math.round(pdfX),
+            y: Math.round(pdfY),
+            text: text.trim(),
+            fontSize: currentEditFontSize,
+            color: currentEditColor,
+          };
+          editAnnotationsByPage[editCurrentPageIndex] = editAnnotationsByPage[editCurrentPageIndex] || [];
+          editAnnotationsByPage[editCurrentPageIndex].push(ann);
+          redrawPageAnnotations();
+        }
+        return;
+      }
+
+      isDrawingAnnotation = true;
+      editDrawStart = { canvasX: x, canvasY: y, pdfX, pdfY };
+      if (currentEditTool === 'pen') {
+        editCurrentStroke = [{ x: pdfX, y: pdfY }];
+      }
+    };
+
+    annotCanvas.onpointermove = (e) => {
+      if (!isDrawingAnnotation || !editDrawStart) return;
+      e.preventDefault();
+      const rect = annotCanvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      const scaleX = (currentPdfPageSize.width || annotCanvas.width) / annotCanvas.width;
+      const scaleY = (currentPdfPageSize.height || annotCanvas.height) / annotCanvas.height;
+      const pdfH = currentPdfPageSize.height || annotCanvas.height;
+
+      const currentPdfX = x * scaleX;
+      const currentPdfY = pdfH - (y * scaleY);
+
+      redrawPageAnnotations();
+
+      const ctx = annotCanvas.getContext('2d');
+      ctx.save();
+      if (currentEditTool === 'pen') {
+        editCurrentStroke.push({ x: currentPdfX, y: currentPdfY });
+        ctx.beginPath();
+        ctx.strokeStyle = currentEditColor;
+        ctx.lineWidth = currentEditWidth;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        const cScaleX = annotCanvas.width / (currentPdfPageSize.width || annotCanvas.width);
+        const cScaleY = annotCanvas.height / (currentPdfPageSize.height || annotCanvas.height);
+        ctx.moveTo(editCurrentStroke[0].x * cScaleX, (pdfH - editCurrentStroke[0].y) * cScaleY);
+        for (let i = 1; i < editCurrentStroke.length; i++) {
+          ctx.lineTo(editCurrentStroke[i].x * cScaleX, (pdfH - editCurrentStroke[i].y) * cScaleY);
+        }
+        ctx.stroke();
+      } else if (currentEditTool === 'highlight') {
+        ctx.fillStyle = currentEditColor || '#fef08a';
+        ctx.globalAlpha = 0.35;
+        const left = Math.min(editDrawStart.canvasX, x);
+        const top = Math.min(editDrawStart.canvasY, y);
+        const w = Math.abs(x - editDrawStart.canvasX);
+        const h = Math.abs(y - editDrawStart.canvasY);
+        ctx.fillRect(left, top, w, h);
+      } else if (currentEditTool === 'rect') {
+        ctx.strokeStyle = currentEditColor;
+        ctx.lineWidth = currentEditWidth;
+        const left = Math.min(editDrawStart.canvasX, x);
+        const top = Math.min(editDrawStart.canvasY, y);
+        const w = Math.abs(x - editDrawStart.canvasX);
+        const h = Math.abs(y - editDrawStart.canvasY);
+        ctx.strokeRect(left, top, w, h);
+      } else if (currentEditTool === 'ellipse') {
+        ctx.strokeStyle = currentEditColor;
+        ctx.lineWidth = currentEditWidth;
+        const left = Math.min(editDrawStart.canvasX, x);
+        const top = Math.min(editDrawStart.canvasY, y);
+        const w = Math.abs(x - editDrawStart.canvasX);
+        const h = Math.abs(y - editDrawStart.canvasY);
+        ctx.beginPath();
+        ctx.ellipse(left + w / 2, top + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (currentEditTool === 'line') {
+        ctx.strokeStyle = currentEditColor;
+        ctx.lineWidth = currentEditWidth;
+        ctx.beginPath();
+        ctx.moveTo(editDrawStart.canvasX, editDrawStart.canvasY);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+      }
+      ctx.restore();
+    };
+
+    const finishDrawing = (e) => {
+      if (!isDrawingAnnotation || !editDrawStart) return;
+      isDrawingAnnotation = false;
+      try { annotCanvas.releasePointerCapture(e.pointerId); } catch {}
+
+      const rect = annotCanvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      const scaleX = (currentPdfPageSize.width || annotCanvas.width) / annotCanvas.width;
+      const scaleY = (currentPdfPageSize.height || annotCanvas.height) / annotCanvas.height;
+      const pdfH = currentPdfPageSize.height || annotCanvas.height;
+
+      const endPdfX = x * scaleX;
+      const endPdfY = pdfH - (y * scaleY);
+
+      editAnnotationsByPage[editCurrentPageIndex] = editAnnotationsByPage[editCurrentPageIndex] || [];
+
+      if (currentEditTool === 'pen') {
+        if (editCurrentStroke.length > 0) {
+          editAnnotationsByPage[editCurrentPageIndex].push({
+            type: 'pen',
+            points: editCurrentStroke.map(pt => ({ x: Math.round(pt.x), y: Math.round(pt.y) })),
+            color: currentEditColor,
+            width: currentEditWidth,
+          });
+        }
+      } else if (currentEditTool === 'highlight') {
+        const left = Math.round(Math.min(editDrawStart.pdfX, endPdfX));
+        const bottom = Math.round(Math.min(editDrawStart.pdfY, endPdfY));
+        const w = Math.round(Math.abs(endPdfX - editDrawStart.pdfX));
+        const h = Math.round(Math.abs(endPdfY - editDrawStart.pdfY));
+        if (w > 2 && h > 2) {
+          editAnnotationsByPage[editCurrentPageIndex].push({
+            type: 'highlight',
+            x: left,
+            y: bottom,
+            width: w,
+            height: h,
+            color: currentEditColor,
+            opacity: 0.35,
+          });
+        }
+      } else if (currentEditTool === 'rect') {
+        const left = Math.round(Math.min(editDrawStart.pdfX, endPdfX));
+        const bottom = Math.round(Math.min(editDrawStart.pdfY, endPdfY));
+        const w = Math.round(Math.abs(endPdfX - editDrawStart.pdfX));
+        const h = Math.round(Math.abs(endPdfY - editDrawStart.pdfY));
+        if (w > 2 && h > 2) {
+          editAnnotationsByPage[editCurrentPageIndex].push({
+            type: 'rect',
+            x: left,
+            y: bottom,
+            width: w,
+            height: h,
+            borderColor: currentEditColor,
+            borderWidth: currentEditWidth,
+            fill: false,
+          });
+        }
+      } else if (currentEditTool === 'ellipse') {
+        const left = Math.round(Math.min(editDrawStart.pdfX, endPdfX));
+        const bottom = Math.round(Math.min(editDrawStart.pdfY, endPdfY));
+        const w = Math.round(Math.abs(endPdfX - editDrawStart.pdfX));
+        const h = Math.round(Math.abs(endPdfY - editDrawStart.pdfY));
+        if (w > 2 && h > 2) {
+          editAnnotationsByPage[editCurrentPageIndex].push({
+            type: 'ellipse',
+            x: left,
+            y: bottom,
+            width: w,
+            height: h,
+            borderColor: currentEditColor,
+            borderWidth: currentEditWidth,
+            fill: false,
+          });
+        }
+      } else if (currentEditTool === 'line') {
+        editAnnotationsByPage[editCurrentPageIndex].push({
+          type: 'line',
+          start: { x: Math.round(editDrawStart.pdfX), y: Math.round(editDrawStart.pdfY) },
+          end: { x: Math.round(endPdfX), y: Math.round(endPdfY) },
+          color: currentEditColor,
+          width: currentEditWidth,
+        });
+      }
+
+      editDrawStart = null;
+      editCurrentStroke = [];
+      redrawPageAnnotations();
+    };
+
+    annotCanvas.onpointerup = finishDrawing;
+    annotCanvas.onpointercancel = finishDrawing;
   }
 
   function renderFileList() {
@@ -2358,6 +2811,133 @@ document.addEventListener('DOMContentLoaded', () => {
       });
 
       updateSigCoordinateDisplay();
+    } else if (currentTool === 'edit-pdf' || currentTool === 'edit') {
+      toolSettings.innerHTML = `
+        <div class="setting-group">
+          <label>Annotation Tool</label>
+          <div class="edit-tools-grid">
+            <button type="button" class="edit-tool-btn ${currentEditTool === 'pen' ? 'active' : ''}" data-tool="pen">✏️ Pen</button>
+            <button type="button" class="edit-tool-btn ${currentEditTool === 'highlight' ? 'active' : ''}" data-tool="highlight">🖍️ Highlight</button>
+            <button type="button" class="edit-tool-btn ${currentEditTool === 'text' ? 'active' : ''}" data-tool="text">🔤 Text</button>
+            <button type="button" class="edit-tool-btn ${currentEditTool === 'rect' ? 'active' : ''}" data-tool="rect">⬜ Rect</button>
+            <button type="button" class="edit-tool-btn ${currentEditTool === 'ellipse' ? 'active' : ''}" data-tool="ellipse">⭕ Ellipse</button>
+            <button type="button" class="edit-tool-btn ${currentEditTool === 'line' ? 'active' : ''}" data-tool="line">📏 Line</button>
+          </div>
+        </div>
+        <div class="setting-group">
+          <label for="editColorInput">Color</label>
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <input type="color" id="editColorInput" value="${currentEditColor}" style="width: 38px; height: 34px; padding: 0; border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">
+            <div class="edit-color-palette">
+              <span class="edit-color-swatch ${currentEditColor === '#ef4444' ? 'active' : ''}" data-color="#ef4444" style="background: #ef4444;" title="Red"></span>
+              <span class="edit-color-swatch ${currentEditColor === '#3b82f6' ? 'active' : ''}" data-color="#3b82f6" style="background: #3b82f6;" title="Blue"></span>
+              <span class="edit-color-swatch ${currentEditColor === '#10b981' ? 'active' : ''}" data-color="#10b981" style="background: #10b981;" title="Green"></span>
+              <span class="edit-color-swatch ${currentEditColor === '#f59e0b' ? 'active' : ''}" data-color="#f59e0b" style="background: #f59e0b;" title="Amber"></span>
+              <span class="edit-color-swatch ${currentEditColor === '#fef08a' ? 'active' : ''}" data-color="#fef08a" style="background: #fef08a;" title="Yellow"></span>
+              <span class="edit-color-swatch ${currentEditColor === '#000000' ? 'active' : ''}" data-color="#000000" style="background: #000000;" title="Black"></span>
+            </div>
+          </div>
+        </div>
+        <div class="setting-group">
+          <label for="editStrokeSlider">Stroke Width: <span id="editStrokeLabel">${currentEditWidth}px</span></label>
+          <input type="range" id="editStrokeSlider" min="1" max="20" value="${currentEditWidth}">
+        </div>
+        <div class="setting-group">
+          <label for="editFontSizeInput">Font Size: <span id="editFontLabel">${currentEditFontSize}pt</span></label>
+          <input type="range" id="editFontSizeInput" min="9" max="64" value="${currentEditFontSize}">
+        </div>
+        <div class="setting-group" style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+          <button type="button" class="secondary-btn" id="editUndoBtn" style="flex: 1;">↩ Undo</button>
+          <button type="button" class="secondary-btn" id="editClearBtn" style="flex: 1;">✕ Clear Page</button>
+        </div>
+      `;
+
+      toolSettings.querySelectorAll('.edit-tool-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          toolSettings.querySelectorAll('.edit-tool-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          currentEditTool = btn.dataset.tool;
+        });
+      });
+
+      const colorInput = toolSettings.querySelector('#editColorInput');
+      if (colorInput) {
+        colorInput.addEventListener('input', (e) => {
+          currentEditColor = e.target.value;
+          toolSettings.querySelectorAll('.edit-color-swatch').forEach(s => s.classList.remove('active'));
+        });
+      }
+
+      toolSettings.querySelectorAll('.edit-color-swatch').forEach(swatch => {
+        swatch.addEventListener('click', () => {
+          currentEditColor = swatch.dataset.color;
+          if (colorInput) colorInput.value = currentEditColor;
+          toolSettings.querySelectorAll('.edit-color-swatch').forEach(s => s.classList.remove('active'));
+          swatch.classList.add('active');
+        });
+      });
+
+      const strokeSlider = toolSettings.querySelector('#editStrokeSlider');
+      if (strokeSlider) {
+        strokeSlider.addEventListener('input', (e) => {
+          currentEditWidth = parseInt(e.target.value, 10);
+          const lbl = toolSettings.querySelector('#editStrokeLabel');
+          if (lbl) lbl.textContent = `${currentEditWidth}px`;
+        });
+      }
+
+      const fontSlider = toolSettings.querySelector('#editFontSizeInput');
+      if (fontSlider) {
+        fontSlider.addEventListener('input', (e) => {
+          currentEditFontSize = parseInt(e.target.value, 10);
+          const lbl = toolSettings.querySelector('#editFontLabel');
+          if (lbl) lbl.textContent = `${currentEditFontSize}pt`;
+        });
+      }
+
+      const undoBtn = toolSettings.querySelector('#editUndoBtn');
+      if (undoBtn) {
+        undoBtn.addEventListener('click', () => {
+          if (editAnnotationsByPage[editCurrentPageIndex] && editAnnotationsByPage[editCurrentPageIndex].length > 0) {
+            editAnnotationsByPage[editCurrentPageIndex].pop();
+            redrawPageAnnotations();
+          }
+        });
+      }
+
+      const clearBtn = toolSettings.querySelector('#editClearBtn');
+      if (clearBtn) {
+        clearBtn.addEventListener('click', () => {
+          editAnnotationsByPage[editCurrentPageIndex] = [];
+          redrawPageAnnotations();
+        });
+      }
+    } else if (currentTool === 'ocr-pdf' || currentTool === 'ocr') {
+      toolSettings.innerHTML = `
+        <div class="setting-group">
+          <label for="ocrLangSelect">Recognition Language</label>
+          <select id="ocrLangSelect" class="form-select">
+            <option value="eng" selected>English (Latin)</option>
+            <option value="spa">Spanish (Español)</option>
+            <option value="fra">French (Français)</option>
+            <option value="deu">German (Deutsch)</option>
+            <option value="chi_sim">Chinese Simplified (简体中文)</option>
+            <option value="jpn">Japanese (日本語)</option>
+          </select>
+          <p class="setting-hint">100% private in-browser OCR engine generates a searchable, selectable text layer directly in your PDF.</p>
+        </div>
+      `;
+    } else if (currentTool === 'scan-to-pdf' || currentTool === 'scan') {
+      toolSettings.innerHTML = `
+        <div class="setting-group">
+          <label>Camera Document Scanner</label>
+          <p class="setting-hint">Capture paper documents via your device camera with live auto-contrast and Otsu binarization.</p>
+          <button type="button" class="primary-btn" id="openScannerFromSettingsBtn" style="width: 100%; margin-top: 0.5rem;">📷 Launch Scanner</button>
+        </div>
+      `;
+      document.getElementById('openScannerFromSettingsBtn')?.addEventListener('click', () => {
+        openCameraScanner();
+      });
     }
   }
 
@@ -2837,6 +3417,25 @@ document.addEventListener('DOMContentLoaded', () => {
         const blob = new Blob([extractedText], { type: mime });
         downloadBlob(blob, `extracted_text.${ext}`);
         showSuccess(`Successfully extracted text to .${ext}!`);
+      } else if (currentTool === 'edit-pdf' || currentTool === 'edit') {
+        if (uploadedFiles.length === 0) {
+          throw new Error('Please upload a PDF document to edit.');
+        }
+        const srcBytes = uploadedFiles[0].bytes.slice();
+        showStatus('Applying edits and baking annotations into PDF...', 'processing');
+        const pdfBytes = await PDFCore.editPDF(srcBytes, editAnnotationsByPage);
+        downloadFile(pdfBytes, 'edited_document.pdf', 'application/pdf');
+        showSuccess('Annotations successfully applied and PDF saved!');
+      } else if (currentTool === 'ocr-pdf' || currentTool === 'ocr') {
+        if (uploadedFiles.length === 0) {
+          throw new Error('Please upload a PDF document to perform OCR.');
+        }
+        const srcBytes = uploadedFiles[0].bytes.slice();
+        const lang = document.getElementById('ocrLangSelect')?.value || 'eng';
+        showStatus(`Running client-side OCR recognition (${lang})...`, 'processing');
+        const pdfBytes = await PDFCore.ocrPDF(srcBytes, { lang });
+        downloadFile(pdfBytes, 'searchable_ocr_document.pdf', 'application/pdf');
+        showSuccess('Searchable PDF generated with embedded text layer!');
       }
     } catch (err) {
       console.error(err);
@@ -3189,10 +3788,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     try {
       if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        scanMediaStream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: scanFacingMode, width: { ideal: 1920 }, height: { ideal: 1080 } },
-          audio: false,
-        });
+        try {
+          scanMediaStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: scanFacingMode, width: { ideal: 1920 }, height: { ideal: 1080 } },
+            audio: false,
+          });
+        } catch (constraintErr) {
+          scanMediaStream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false,
+          });
+        }
         video.srcObject = scanMediaStream;
       } else {
         throw new Error('Camera access not supported on this browser or origin.');
@@ -3221,6 +3827,69 @@ document.addEventListener('DOMContentLoaded', () => {
         const ctx = canvas.getContext('2d');
         ctx.drawImage(video, 0, 0, w, h);
 
+        const filterSelect = document.getElementById('scanFilterSelect');
+        const filter = filterSelect ? filterSelect.value : 'color';
+
+        if (filter === 'contrast') {
+          const imgData = ctx.getImageData(0, 0, w, h);
+          const data = imgData.data;
+          let minLum = 255;
+          let maxLum = 0;
+          const len = data.length;
+          for (let i = 0; i < len; i += 4) {
+            const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+            if (lum < minLum) minLum = lum;
+            if (lum > maxLum) maxLum = lum;
+          }
+          const range = maxLum - minLum;
+          if (range > 10) {
+            for (let i = 0; i < len; i += 4) {
+              data[i] = Math.min(255, Math.max(0, ((data[i] - minLum) / range) * 255));
+              data[i + 1] = Math.min(255, Math.max(0, ((data[i + 1] - minLum) / range) * 255));
+              data[i + 2] = Math.min(255, Math.max(0, ((data[i + 2] - minLum) / range) * 255));
+            }
+            ctx.putImageData(imgData, 0, 0);
+          }
+        } else if (filter === 'bw') {
+          const imgData = ctx.getImageData(0, 0, w, h);
+          const data = imgData.data;
+          const len = data.length;
+          const totalPixels = len / 4;
+          const histogram = new Int32Array(256);
+          for (let i = 0; i < len; i += 4) {
+            const lum = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+            histogram[lum]++;
+          }
+          let sumAll = 0;
+          for (let t = 0; t < 256; t++) sumAll += t * histogram[t];
+          let sumB = 0;
+          let wB = 0;
+          let maxVariance = 0;
+          let threshold = 128;
+          for (let t = 0; t < 256; t++) {
+            wB += histogram[t];
+            if (wB === 0) continue;
+            const wF = totalPixels - wB;
+            if (wF === 0) break;
+            sumB += t * histogram[t];
+            const mB = sumB / wB;
+            const mF = (sumAll - sumB) / wF;
+            const betweenVariance = wB * wF * (mB - mF) * (mB - mF);
+            if (betweenVariance > maxVariance) {
+              maxVariance = betweenVariance;
+              threshold = t;
+            }
+          }
+          for (let i = 0; i < len; i += 4) {
+            const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+            const val = lum >= threshold ? 255 : 0;
+            data[i] = val;
+            data[i + 1] = val;
+            data[i + 2] = val;
+          }
+          ctx.putImageData(imgData, 0, 0);
+        }
+
         canvas.toBlob((blob) => {
           if (!blob) return;
           const url = URL.createObjectURL(blob);
@@ -3244,7 +3913,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (scannedPages.length === 0) return;
         try {
           showStatus('Assembling scanned pages into PDF...', 'processing');
-          const pdfBytes = await PDFCore.imagesToPDF(scannedPages, { margin: 10, pageSize: 'a4' });
+          const pdfBytes = await PDFCore.imagesToPDF(scannedPages, { margin: 20, pageSize: 'a4' });
           downloadFile(pdfBytes, 'scanned_document.pdf', 'application/pdf');
           closeScanModal();
           showSuccess(`Successfully scanned and compiled ${scannedPages.length} page(s) into PDF!`);
