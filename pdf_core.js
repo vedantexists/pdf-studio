@@ -10,7 +10,19 @@
     root.PDFCore = factory(root.PDFLib);
   }
 })(typeof self !== 'undefined' ? self : this, function (PDFLib) {
-  const { PDFDocument, rgb, degrees, StandardFonts, PDFName, PDFHexString } = PDFLib;
+  const {
+    PDFDocument,
+    rgb,
+    degrees,
+    StandardFonts,
+    PDFName,
+    PDFHexString,
+    PDFTextField,
+    PDFCheckBox,
+    PDFDropdown,
+    PDFRadioGroup,
+    PDFOptionList,
+  } = PDFLib;
 
   /**
    * Merge multiple PDF files into a single PDF document.
@@ -300,6 +312,9 @@
       else if (step.op === 'sign') currentBytes = await signPDF(currentBytes, step.signatureData, step.pageIndex, step.options);
       else if (step.op === 'protect') currentBytes = await protectPDF(currentBytes, step.userPassword || step.options?.userPassword, step.ownerPassword || step.options?.ownerPassword, step.permissions || step.options?.permissions);
       else if (step.op === 'unlock') currentBytes = await unlockPDF(currentBytes, step.password || step.options?.password);
+      else if (step.op === 'crop') currentBytes = await cropPDF(currentBytes, step.cropBoxes || step.options?.cropBoxes);
+      else if (step.op === 'fillForm') currentBytes = await fillForm(currentBytes, step.fieldValues || step.options?.fieldValues, step.flatten !== undefined ? step.flatten : step.options?.flatten);
+      else if (step.op === 'removePages' || step.op === 'remove') currentBytes = await removePages(currentBytes, step.pageIndices || step.options?.pageIndices);
     }
     return currentBytes;
   }
@@ -628,6 +643,251 @@
     return await doc.save();
   }
 
+  /**
+   * Crop pages in a PDF document by updating CropBox coordinates in PDF points.
+   * Supports an array of { pageIndex, x, y, width, height } or a single { x, y, width, height }.
+   * Preserves dimensions of uncropped pages (multi-page crop isolation).
+   * @param {Uint8Array|ArrayBuffer} pdfBytes
+   * @param {Array<{ pageIndex?: number, x: number, y: number, width: number, height: number }>|Object} cropBoxes
+   * @returns {Promise<Uint8Array>}
+   */
+  async function cropPDF(pdfBytes, cropBoxes) {
+    if (!pdfBytes) throw new Error('PDF bytes are required to crop.');
+    if (!cropBoxes) throw new Error('Crop box configuration is required.');
+
+    const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+    const totalPages = doc.getPageCount();
+
+    const boxes = Array.isArray(cropBoxes) ? cropBoxes : [cropBoxes];
+    if (boxes.length === 0) {
+      throw new Error('At least one crop box must be provided.');
+    }
+
+    for (const box of boxes) {
+      if (!box || typeof box !== 'object') {
+        throw new Error('Invalid crop box: must be an object.');
+      }
+      const width = Number(box.width);
+      const height = Number(box.height);
+      if (isNaN(width) || isNaN(height) || width <= 0 || height <= 0) {
+        throw new Error('Invalid crop bounds: width and height must be positive numbers.');
+      }
+      const x = box.x !== undefined ? Number(box.x) : 0;
+      const y = box.y !== undefined ? Number(box.y) : 0;
+      if (isNaN(x) || isNaN(y)) {
+        throw new Error('Invalid crop bounds: coordinates x and y must be numbers.');
+      }
+
+      if (box.pageIndex !== undefined && box.pageIndex !== null) {
+        const pIdx = Number(box.pageIndex);
+        if (pIdx >= 0 && pIdx < totalPages) {
+          doc.getPage(pIdx).setCropBox(x, y, width, height);
+        }
+      } else {
+        const pages = doc.getPages();
+        for (const page of pages) {
+          page.setCropBox(x, y, width, height);
+        }
+      }
+    }
+
+    return await doc.save();
+  }
+
+  /**
+   * Inspect AcroForm fields in a PDF document.
+   * Safe on documents without form fields (returns empty array []).
+   * @param {Uint8Array|ArrayBuffer} pdfBytes
+   * @returns {Promise<Array<{ name: string, type: 'text'|'checkbox'|'dropdown'|'radio'|'optionlist', value: any, options?: string[] }>>}
+   */
+  async function inspectForm(pdfBytes) {
+    if (!pdfBytes) return [];
+    try {
+      const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+      let form;
+      try {
+        form = doc.getForm();
+      } catch (e) {
+        return [];
+      }
+      if (!form) return [];
+
+      let rawFields;
+      try {
+        rawFields = form.getFields();
+      } catch (e) {
+        return [];
+      }
+      if (!rawFields || rawFields.length === 0) return [];
+
+      const result = [];
+      for (const field of rawFields) {
+        const name = field.getName();
+        let type = 'text';
+        let value = '';
+        let options = undefined;
+
+        if (PDFTextField && field instanceof PDFTextField) {
+          type = 'text';
+          value = field.getText() || '';
+        } else if (PDFCheckBox && field instanceof PDFCheckBox) {
+          type = 'checkbox';
+          value = field.isChecked();
+        } else if (PDFDropdown && field instanceof PDFDropdown) {
+          type = 'dropdown';
+          const sel = field.getSelected();
+          value = sel && sel.length > 0 ? (sel.length === 1 ? sel[0] : sel) : '';
+          options = field.getOptions();
+        } else if (PDFRadioGroup && field instanceof PDFRadioGroup) {
+          type = 'radio';
+          value = field.getSelected() || '';
+          options = field.getOptions();
+        } else if (PDFOptionList && field instanceof PDFOptionList) {
+          type = 'optionlist';
+          value = field.getSelected();
+          options = field.getOptions();
+        } else {
+          const cName = field.constructor ? field.constructor.name : '';
+          if (cName.includes('Text') || typeof field.getText === 'function') {
+            type = 'text';
+            value = typeof field.getText === 'function' ? (field.getText() || '') : '';
+          } else if (cName.includes('Check') || typeof field.isChecked === 'function') {
+            type = 'checkbox';
+            value = typeof field.isChecked === 'function' ? field.isChecked() : false;
+          } else if (cName.includes('Dropdown') || (typeof field.getOptions === 'function' && typeof field.getSelected === 'function')) {
+            type = 'dropdown';
+            const sel = typeof field.getSelected === 'function' ? field.getSelected() : [];
+            value = sel && sel.length > 0 ? (sel.length === 1 ? sel[0] : sel) : '';
+            options = typeof field.getOptions === 'function' ? field.getOptions() : [];
+          } else if (cName.includes('Radio')) {
+            type = 'radio';
+            value = typeof field.getSelected === 'function' ? (field.getSelected() || '') : '';
+            options = typeof field.getOptions === 'function' ? field.getOptions() : [];
+          } else if (cName.includes('Option')) {
+            type = 'optionlist';
+            value = typeof field.getSelected === 'function' ? field.getSelected() : [];
+            options = typeof field.getOptions === 'function' ? field.getOptions() : [];
+          }
+        }
+
+        const fieldInfo = { name, type, value };
+        if (options !== undefined) {
+          fieldInfo.options = options;
+        }
+        result.push(fieldInfo);
+      }
+      return result;
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /**
+   * Fill interactive form fields and optionally flatten the form into static page graphics.
+   * @param {Uint8Array|ArrayBuffer} pdfBytes
+   * @param {Object} [fieldValues={}] - Key-value map of { fieldName: value }
+   * @param {boolean} [flatten=false] - If true, permanently bakes appearances via form.flatten()
+   * @returns {Promise<Uint8Array>}
+   */
+  async function fillForm(pdfBytes, fieldValues = {}, flatten = false) {
+    if (!pdfBytes) throw new Error('PDF bytes are required to fill form.');
+    const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+    let form;
+    try {
+      form = doc.getForm();
+    } catch (e) {
+      form = null;
+    }
+
+    if (form && fieldValues && typeof fieldValues === 'object') {
+      for (const [name, val] of Object.entries(fieldValues)) {
+        if (val === undefined || val === null) continue;
+        try {
+          const field = form.getField(name);
+          if (!field) continue;
+
+          if (PDFTextField && field instanceof PDFTextField) {
+            field.setText(String(val));
+          } else if (PDFCheckBox && field instanceof PDFCheckBox) {
+            if (val === true || val === 'true' || val === 1 || val === 'on') {
+              field.check();
+            } else {
+              field.uncheck();
+            }
+          } else if (PDFDropdown && field instanceof PDFDropdown) {
+            if (Array.isArray(val)) {
+              val.forEach((item) => field.select(String(item)));
+            } else {
+              field.select(String(val));
+            }
+          } else if (PDFRadioGroup && field instanceof PDFRadioGroup) {
+            field.select(String(val));
+          } else if (PDFOptionList && field instanceof PDFOptionList) {
+            if (Array.isArray(val)) {
+              val.forEach((item) => field.select(String(item)));
+            } else {
+              field.select(String(val));
+            }
+          } else {
+            if (typeof field.setText === 'function') {
+              field.setText(String(val));
+            } else if (typeof field.check === 'function') {
+              if (val) field.check(); else field.uncheck();
+            } else if (typeof field.select === 'function') {
+              field.select(val);
+            }
+          }
+        } catch (err) {
+          // If field not found or value not in options, continue safely
+        }
+      }
+    }
+
+    if (flatten && form && typeof form.flatten === 'function') {
+      try {
+        form.flatten();
+      } catch (err) {
+        // Continue safely if already flattened or empty
+      }
+    }
+
+    return await doc.save();
+  }
+
+  /**
+   * Delete specified pages from a PDF document using descending in-place deletion.
+   * Validates that at least one page remains in the document.
+   * @param {Uint8Array|ArrayBuffer} pdfBytes
+   * @param {number[]} pageIndicesToRemove - 0-indexed page indices
+   * @returns {Promise<Uint8Array>}
+   */
+  async function removePages(pdfBytes, pageIndicesToRemove) {
+    if (!pdfBytes) throw new Error('PDF bytes are required to remove pages.');
+    const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+    const totalPages = doc.getPageCount();
+
+    if (!pageIndicesToRemove || !Array.isArray(pageIndicesToRemove) || pageIndicesToRemove.length === 0) {
+      return await doc.save();
+    }
+
+    // Deduplicate and filter valid indices
+    const uniqueIndices = Array.from(new Set(pageIndicesToRemove))
+      .filter((idx) => typeof idx === 'number' && !isNaN(idx) && idx >= 0 && idx < totalPages);
+
+    if (uniqueIndices.length >= totalPages) {
+      throw new Error('Cannot remove all pages: at least one page must remain in the document.');
+    }
+
+    // Sort descending for safe in-place deletion without index shifting
+    uniqueIndices.sort((a, b) => b - a);
+
+    for (const idx of uniqueIndices) {
+      doc.removePage(idx);
+    }
+
+    return await doc.save();
+  }
+
   return {
     mergePDFs,
     splitPDF,
@@ -642,5 +902,9 @@
     protectPDF,
     unlockPDF,
     signPDF,
+    cropPDF,
+    inspectForm,
+    fillForm,
+    removePages,
   };
 });
