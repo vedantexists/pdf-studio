@@ -39,6 +39,20 @@ document.addEventListener('DOMContentLoaded', () => {
   let activePages = [];   // Array<{ pageNum: number, rotation: number, isDeleted: boolean }>
   let isProcessing = false;
 
+  // Signature & Document Security Suite State
+  let currentSignatureDataUrl = null;
+  let signCurrentPageIndex = 0;
+  let sigOverlayPos = { left: 40, top: 60, width: 160, height: 80 };
+  let currentPdfPageSize = { width: 612, height: 792 };
+  let isDraggingSig = false;
+  let isResizingSig = false;
+  let sigDragStart = { x: 0, y: 0, left: 40, top: 60, width: 160, height: 80 };
+  let activeSignTab = 'draw';
+  let sigColor = '#000000';
+  let sigStrokeWidth = 2;
+  let sigFont = "'Dancing Script', cursive";
+  let hasDrawn = false;
+
   // Complete Tools Registry
   const TOOLS = {
     'merge': {
@@ -1237,8 +1251,14 @@ document.addEventListener('DOMContentLoaded', () => {
   function showSuccess(message) {
     statusBanner.className = 'status-banner success';
     statusBanner.innerHTML = `
-      <div><strong>✓ Success!</strong> ${message}</div>
-      <div style="font-size: 0.85rem;">Your download should begin automatically.</div>
+      <div style="display: flex; align-items: center; gap: 0.6rem;">
+        <span style="display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: #10b981; color: #fff; font-size: 0.75rem; font-weight: 800;">✓</span>
+        <div>
+          <div style="font-weight: 700; font-size: 0.95rem;">${message}</div>
+          <div style="font-size: 0.78rem; color: #a7f3d0;">Your download should begin automatically.</div>
+        </div>
+      </div>
+      <span style="background: rgba(255, 255, 255, 0.15); color: #6ee7b7; font-size: 0.75rem; font-weight: 700; padding: 0.2rem 0.55rem; border-radius: 9999px; white-space: nowrap;">0ms Upload</span>
     `;
     statusBanner.style.display = 'flex';
   }

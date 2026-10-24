@@ -6,6 +6,9 @@
   <title>PDFForge - Fast, Zero-Upload Client-Side PDF Studio</title>
   <meta name="description" content="100% private in-browser PDF suite. Merge, split, organize, rotate, sign, protect, unlock, and edit PDFs with zero file uploads.">
   <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600&family=Dancing+Script:wght@700&family=Great+Vibes&display=swap" rel="stylesheet">
   
   <!-- Client-side PDF & Zip dependencies (Local first, CDN fallback) -->
   <script src="node_modules/pdf-lib/dist/pdf-lib.min.js" onerror="this.onerror=null;this.src='https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js'"></script>
@@ -23,8 +26,23 @@
   </script>
 </head>
 <body>
-  <!-- Header -->
-  <header class="app-header">
+  <div class="studio-app-wrapper">
+    <div class="studio-window">
+      <!-- Window Titlebar (Mac/Modern window frame) -->
+      <div class="window-titlebar">
+        <div class="window-dots">
+          <span class="dot dot-close"></span>
+          <span class="dot dot-minimize"></span>
+          <span class="dot dot-maximize"></span>
+        </div>
+        <div class="window-title">PDFForge Studio &bull; 100% Local In-Browser Processing</div>
+        <div class="window-actions">
+          <span class="window-tag">Zero Uploads</span>
+        </div>
+      </div>
+
+      <!-- Header -->
+      <header class="app-header">
     <div class="header-container">
       <div class="logo" id="homeLogoBtn" tabindex="0" role="button" aria-label="PDFForge Home">
         <svg class="logo-mark" viewBox="0 0 32 32" width="28" height="28" fill="none">
@@ -223,8 +241,8 @@
 
       <div class="header-right">
         <div class="privacy-pill" title="Processing happens 100% locally in your browser memory">
-          <span>🔒</span>
-          <span>100% In-Browser Privacy</span>
+          <span class="privacy-dot"></span>
+          <span>Zero Server Uploads</span>
         </div>
         <button class="mobile-menu-toggle" id="mobileMenuToggle" aria-label="Toggle navigation menu" aria-expanded="false">
           <span class="hamburger-bar"></span>
@@ -441,11 +459,17 @@
 
       <!-- Dropzone (shown initially when no file is chosen or to add more) -->
       <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Drag and drop or select files">
-        <div class="dropzone-icon">☁</div>
-        <h3 id="dropzoneHeading">Select PDF files</h3>
-        <p id="dropzoneSubtitle">or drag and drop PDFs here</p>
+        <div class="dropzone-icon-container">
+          <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="17 8 12 3 7 8"></polyline>
+            <line x1="12" y1="3" x2="12" y2="15"></line>
+          </svg>
+        </div>
+        <h3 id="dropzoneHeading">Select or Drop PDF files here</h3>
+        <p id="dropzoneSubtitle">Process files directly in your browser memory &bull; 100% Private</p>
         <button type="button" class="primary-btn" id="browseBtn">
-          <span>Choose Files</span>
+          <span>Choose PDF Document</span>
         </button>
         <input type="file" id="pdfFileInput" accept=".pdf,application/pdf" multiple style="display: none;">
         <input type="file" id="imgFileInput" accept="image/jpeg,image/png,image/webp" multiple style="display: none;">
@@ -488,21 +512,109 @@
         <h3 id="signModalTitle">Sign Document</h3>
         <button type="button" class="modal-close-btn" data-close-modal aria-label="Close modal">✕</button>
       </div>
-      <div class="modal-body" id="signModalBody"></div>
+      <div class="modal-body" id="signModalBody">
+        <div class="modal-tabs" role="tablist">
+          <button type="button" class="tab-btn active" id="tabDrawBtn" data-tab="draw">Draw</button>
+          <button type="button" class="tab-btn" id="tabTypeBtn" data-tab="type">Type</button>
+          <button type="button" class="tab-btn" id="tabUploadBtn" data-tab="upload">Upload</button>
+        </div>
+
+        <!-- Draw Mode Panel -->
+        <div id="drawTabPanel" class="tab-panel">
+          <canvas id="sigDrawCanvas" width="540" height="180" class="signature-canvas"></canvas>
+          <div class="sig-toolbar">
+            <div class="sig-color-palette">
+              <button type="button" class="color-dot active" data-color="#000000" style="background:#000000;" title="Black"></button>
+              <button type="button" class="color-dot" data-color="#0052cc" style="background:#0052cc;" title="Blue"></button>
+              <button type="button" class="color-dot" data-color="#e5322d" style="background:#e5322d;" title="Red"></button>
+            </div>
+            <div style="display:flex; align-items:center; gap:0.5rem;">
+              <label for="sigStrokeWidth" style="font-size:0.85rem; font-weight:600;">Width</label>
+              <input type="range" id="sigStrokeWidth" min="1" max="6" value="2" style="accent-color: var(--primary); width:80px;">
+            </div>
+            <button type="button" class="secondary-btn" id="sigClearCanvasBtn">Clear</button>
+          </div>
+        </div>
+
+        <!-- Type Mode Panel -->
+        <div id="typeTabPanel" class="tab-panel" style="display: none;">
+          <input type="text" id="sigTextInput" placeholder="Type your full name or initials" class="sig-type-input">
+          <div class="sig-toolbar">
+            <select id="sigFontSelect" style="padding:0.5rem; border-radius:var(--radius-sm); border:1px solid var(--border);">
+              <option value="'Dancing Script', cursive">Dancing Script</option>
+              <option value="'Caveat', cursive">Caveat</option>
+              <option value="'Great Vibes', cursive">Great Vibes</option>
+              <option value="'Brush Script MT', cursive">Brush Script MT</option>
+              <option value="'Segoe Script', cursive">Segoe Script</option>
+            </select>
+            <div class="sig-color-palette">
+              <button type="button" class="color-dot-type active" data-color="#000000" style="background:#000000;" title="Black"></button>
+              <button type="button" class="color-dot-type" data-color="#0052cc" style="background:#0052cc;" title="Blue"></button>
+              <button type="button" class="color-dot-type" data-color="#e5322d" style="background:#e5322d;" title="Red"></button>
+            </div>
+          </div>
+          <canvas id="sigTypeCanvas" width="540" height="120" class="signature-preview-canvas"></canvas>
+        </div>
+
+        <!-- Upload Mode Panel -->
+        <div id="uploadTabPanel" class="tab-panel" style="display: none;">
+          <div class="sig-upload-preview" id="sigUploadDropzone">
+            <img id="sigUploadedImagePreview" alt="Uploaded signature" style="display: none; max-width: 100%; max-height: 150px; object-fit: contain;">
+            <div id="sigUploadPlaceholder" style="text-align: center; padding: 1.5rem;">
+              <p style="font-weight: 600; margin-bottom: 0.5rem;">Upload transparent PNG or JPG signature</p>
+              <button type="button" class="secondary-btn" id="sigUploadBrowseBtn">Browse Image</button>
+              <input type="file" id="sigUploadFileInput" accept="image/png,image/jpeg,image/webp" style="display: none;">
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="secondary-btn" data-close-modal>Cancel</button>
+          <button type="button" class="primary-btn" id="sigApplySignatureBtn">Use Signature</button>
+        </div>
+      </div>
     </div>
     <div id="unlockModal" class="modal-dialog" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="unlockModalTitle">
       <div class="modal-header">
         <h3 id="unlockModalTitle">Unlock PDF</h3>
         <button type="button" class="modal-close-btn" data-close-modal aria-label="Close modal">✕</button>
       </div>
-      <div class="modal-body" id="unlockModalBody"></div>
+      <div class="modal-body" id="unlockModalBody">
+        <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1rem;">
+          Enter the password to unlock this PDF. If the document is restricted only by permissions or owner locks, leave blank and click Unlock.
+        </p>
+        <div class="setting-group">
+          <label for="modalUnlockPasswordInput">Password</label>
+          <input type="password" id="modalUnlockPasswordInput" placeholder="Password (leave blank for permissions lock)">
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="secondary-btn" data-close-modal>Cancel</button>
+          <button type="button" class="primary-btn" id="modalUnlockSubmitBtn">Unlock Document</button>
+        </div>
+      </div>
     </div>
     <div id="protectModal" class="modal-dialog" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="protectModalTitle">
       <div class="modal-header">
         <h3 id="protectModalTitle">Protect PDF</h3>
         <button type="button" class="modal-close-btn" data-close-modal aria-label="Close modal">✕</button>
       </div>
-      <div class="modal-body" id="protectModalBody"></div>
+      <div class="modal-body" id="protectModalBody">
+        <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1rem;">
+          Set a secure user password to encrypt this PDF document. The password will be required whenever anyone opens the file.
+        </p>
+        <div class="setting-group">
+          <label for="modalProtectPasswordInput">Password *</label>
+          <input type="password" id="modalProtectPasswordInput" placeholder="Enter password (required)">
+        </div>
+        <div class="setting-group" style="margin-top: 0.75rem;">
+          <label for="modalProtectConfirmInput">Confirm Password *</label>
+          <input type="password" id="modalProtectConfirmInput" placeholder="Confirm password">
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="secondary-btn" data-close-modal>Cancel</button>
+          <button type="button" class="primary-btn" id="modalProtectSubmitBtn">Protect Document</button>
+        </div>
+      </div>
     </div>
     <div id="cropModal" class="modal-dialog" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="cropModalTitle">
       <div class="modal-header">
@@ -520,9 +632,11 @@
     </div>
   </div>
 
-  <footer>
-    <p>PDFForge &bull; Zero-Upload Client-Side PDF Studio &bull; Files are processed entirely in memory in your browser. No files are ever uploaded to any server.</p>
-  </footer>
+      <footer>
+        <p>PDFForge &bull; Zero-Upload Client-Side PDF Studio &bull; Files are processed entirely in memory in your browser. No files are ever uploaded to any server.</p>
+      </footer>
+    </div>
+  </div>
 
   <script src="pdf_core.js"></script>
   <script src="app.js"></script>

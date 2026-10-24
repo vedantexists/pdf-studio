@@ -26,12 +26,82 @@
 
 body {
   font-family: var(--font-sans);
-  background-color: var(--bg-main);
+  background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
   color: var(--text-main);
   min-height: 100vh;
+  margin: 0;
+  padding: 1.75rem 1rem;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
+}
+
+.studio-app-wrapper {
+  max-width: 1240px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.studio-window {
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.1);
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  line-height: 1.5;
+}
+
+/* Window Titlebar (matches README hero mockup) */
+.window-titlebar {
+  background: #f8fafc;
+  border-bottom: 1px solid var(--border);
+  padding: 0.65rem 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  user-select: none;
+}
+
+.window-dots {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 80px;
+}
+
+.dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.dot-close { background: #ef4444; }
+.dot-minimize { background: #f59e0b; }
+.dot-maximize { background: #10b981; }
+
+.window-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #64748b;
+  letter-spacing: 0.02em;
+}
+
+.window-actions {
+  width: 80px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.window-tag {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #047857;
+  background: #ecfdf5;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
 }
 
 /* Header */
@@ -506,6 +576,202 @@ body {
   padding: 1.5rem;
 }
 
+/* Signature Modal Tabs & Content */
+.modal-tabs {
+  display: flex;
+  border-bottom: 2px solid var(--border);
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.tab-btn {
+  background: transparent;
+  border: none;
+  border-bottom: 3px solid transparent;
+  padding: 0.6rem 1.25rem;
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  margin-bottom: -2px;
+}
+
+.tab-btn:hover {
+  color: var(--text-main);
+}
+
+.tab-btn.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+.tab-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.signature-canvas, .signature-preview-canvas {
+  width: 100%;
+  max-width: 100%;
+  background: #ffffff;
+  border: 1px dashed var(--border-hover);
+  border-radius: var(--radius-sm);
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.sig-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.sig-color-palette {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.color-dot, .color-dot-type {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: transform 0.1s, border-color 0.1s;
+}
+
+.color-dot:hover, .color-dot-type:hover {
+  transform: scale(1.15);
+}
+
+.color-dot.active, .color-dot-type.active {
+  border-color: #0f172a;
+  box-shadow: 0 0 0 2px rgba(229, 50, 45, 0.4);
+}
+
+.sig-type-input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  font-size: 1.2rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+}
+
+.sig-upload-preview {
+  width: 100%;
+  min-height: 160px;
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fafafa;
+  overflow: hidden;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+/* Signature Drag & Drop Placement Overlay */
+.sign-preview-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+}
+
+.sign-page-nav {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.sign-page-wrapper {
+  position: relative;
+  display: inline-block;
+  background: #ffffff;
+  box-shadow: var(--shadow-md);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  user-select: none;
+  max-width: 100%;
+}
+
+.sign-page-wrapper canvas {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.signature-overlay {
+  position: absolute;
+  border: 2px dashed var(--primary);
+  background: rgba(229, 50, 45, 0.05);
+  cursor: move;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  touch-action: none;
+  z-index: 10;
+}
+
+.signature-overlay img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.signature-overlay .resize-handle {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  width: 14px;
+  height: 14px;
+  background: var(--primary);
+  border: 2px solid #ffffff;
+  border-radius: 2px;
+  cursor: nwse-resize;
+  z-index: 11;
+}
+
+.signature-overlay .sig-delete-btn {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 18px;
+  height: 18px;
+  background: #ef4444;
+  color: #fff;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  z-index: 12;
+}
+
 @media (max-width: 960px) {
   .mega-nav {
     display: none;
@@ -647,60 +913,74 @@ main {
   font-weight: 800;
 }
 
-/* Drop Zone */
+/* Drop Zone (matches README demo) */
 .dropzone {
-  background: #ffffff;
-  border: 2px dashed #cbd5e1;
-  border-radius: var(--radius-lg);
+  background: #f8fafc;
+  border: 2px dashed #c7d2fe;
+  border-radius: 16px;
   padding: 3.5rem 2rem;
   text-align: center;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
 }
 
 .dropzone:hover, .dropzone.dragover {
   border-color: var(--primary);
-  background: #fffafa;
+  background: #eef2ff;
+  transform: translateY(-2px);
 }
 
-.dropzone-icon {
-  font-size: 3.2rem;
+.dropzone-icon-container {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: #eef2ff;
   color: var(--primary);
-  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 1.25rem;
+  transition: transform 0.2s ease;
+}
+
+.dropzone:hover .dropzone-icon-container {
+  transform: scale(1.08);
 }
 
 .dropzone h3 {
-  font-size: 1.4rem;
+  font-size: 1.35rem;
   font-weight: 700;
+  color: #1e293b;
   margin-bottom: 0.5rem;
 }
 
 .dropzone p {
   color: var(--text-muted);
   font-size: 0.95rem;
-  margin-bottom: 1.25rem;
+  margin-bottom: 1.5rem;
 }
 
 .primary-btn {
-  background: var(--primary);
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
   color: #fff;
   border: none;
-  border-radius: var(--radius-md);
+  border-radius: 10px;
   padding: 0.85rem 1.75rem;
-  font-size: 1.05rem;
+  font-size: 1rem;
   font-weight: 700;
   cursor: pointer;
-  transition: background 0.15s, transform 0.1s;
+  transition: all 0.15s ease;
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.25);
+  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.35);
 }
 
 .primary-btn:hover {
-  background: var(--primary-hover);
+  background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%);
   transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(79, 70, 229, 0.45);
 }
 
 .primary-btn:active {
@@ -970,12 +1250,16 @@ main {
 
 .status-banner.success {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
   gap: 0.75rem;
-  background: #f0fdf4;
-  color: #166534;
-  border: 1px solid #bbf7d0;
-  text-align: center;
+  background: #065f46;
+  color: #ffffff;
+  border: 1px solid #059669;
+  border-radius: 10px;
+  padding: 0.85rem 1.25rem;
+  box-shadow: 0 10px 25px rgba(6, 95, 70, 0.25);
+  text-align: left;
 }
 
 .status-banner.error {

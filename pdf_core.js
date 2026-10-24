@@ -10,7 +10,7 @@
     root.PDFCore = factory(root.PDFLib);
   }
 })(typeof self !== 'undefined' ? self : this, function (PDFLib) {
-  const { PDFDocument, rgb, degrees, StandardFonts } = PDFLib;
+  const { PDFDocument, rgb, degrees, StandardFonts, PDFName, PDFHexString } = PDFLib;
 
   /**
    * Merge multiple PDF files into a single PDF document.
@@ -297,6 +297,9 @@
       else if (step.op === 'rotate') currentBytes = await rotatePDF(currentBytes, step.angle, step.pageIndices);
       else if (step.op === 'organize') currentBytes = await organizePDF(currentBytes, step.pagesConfig);
       else if (step.op === 'extract') currentBytes = await extractPages(currentBytes, step.pageIndices);
+      else if (step.op === 'sign') currentBytes = await signPDF(currentBytes, step.signatureData, step.pageIndex, step.options);
+      else if (step.op === 'protect') currentBytes = await protectPDF(currentBytes, step.userPassword || step.options?.userPassword, step.ownerPassword || step.options?.ownerPassword, step.permissions || step.options?.permissions);
+      else if (step.op === 'unlock') currentBytes = await unlockPDF(currentBytes, step.password || step.options?.password);
     }
     return currentBytes;
   }
@@ -335,6 +338,296 @@
     return Array.from(indices).sort((a, b) => a - b);
   }
 
+  /**
+   * Fast pure JS MD5 implementation for standard PDF encryption hash generation.
+   * @param {Uint8Array|string} input 
+   * @returns {string} Hex string (32 lowercase hex characters)
+   */
+  function md5(input) {
+    let bytes;
+    if (typeof input === 'string') {
+      bytes = [];
+      for (let i = 0; i < input.length; i++) {
+        const code = input.charCodeAt(i);
+        if (code < 128) bytes.push(code);
+        else if (code < 2048) {
+          bytes.push((code >> 6) | 192, (code & 63) | 128);
+        } else {
+          bytes.push((code >> 12) | 224, ((code >> 6) & 63) | 128, (code & 63) | 128);
+        }
+      }
+    } else {
+      bytes = Array.from(input);
+    }
+
+    function toWords(b) {
+      const words = [];
+      for (let i = 0; i < b.length; i++) {
+        words[i >> 2] |= (b[i] & 0xff) << ((i % 4) * 8);
+      }
+      return words;
+    }
+    function cmn(q, a, b, x, s, t) {
+      a = (a + q + x + t) | 0;
+      return (((a << s) | (a >>> (32 - s))) + b) | 0;
+    }
+    function ff(a, b, c, d, x, s, t) { return cmn((b & c) | (~b & d), a, b, x, s, t); }
+    function gg(a, b, c, d, x, s, t) { return cmn((b & d) | (c & ~d), a, b, x, s, t); }
+    function hh(a, b, c, d, x, s, t) { return cmn(b ^ c ^ d, a, b, x, s, t); }
+    function ii(a, b, c, d, x, s, t) { return cmn(c ^ (b | ~d), a, b, x, s, t); }
+
+    const n = bytes.length;
+    const x = toWords(bytes);
+    x[n >> 2] |= 0x80 << ((n % 4) * 8);
+    x[(((n + 8) >> 6) << 4) + 14] = n * 8;
+
+    let a = 1732584193, b = -271733879, c = -1732584194, d = 271733878;
+    for (let i = 0; i < x.length; i += 16) {
+      const olda = a, oldb = b, oldc = c, oldd = d;
+      a = ff(a, b, c, d, x[i + 0] || 0, 7, -680876936);
+      d = ff(d, a, b, c, x[i + 1] || 0, 12, -389564586);
+      c = ff(c, d, a, b, x[i + 2] || 0, 17, 606105819);
+      b = ff(b, c, d, a, x[i + 3] || 0, 22, -1044525330);
+      a = ff(a, b, c, d, x[i + 4] || 0, 7, -176418897);
+      d = ff(d, a, b, c, x[i + 5] || 0, 12, 1200080426);
+      c = ff(c, d, a, b, x[i + 6] || 0, 17, -1473231341);
+      b = ff(b, c, d, a, x[i + 7] || 0, 22, -45705983);
+      a = ff(a, b, c, d, x[i + 8] || 0, 7, 1770035416);
+      d = ff(d, a, b, c, x[i + 9] || 0, 12, -1958414417);
+      c = ff(c, d, a, b, x[i + 10] || 0, 17, -42063);
+      b = ff(b, c, d, a, x[i + 11] || 0, 22, -1990404162);
+      a = ff(a, b, c, d, x[i + 12] || 0, 7, 1804603682);
+      d = ff(d, a, b, c, x[i + 13] || 0, 12, -40341101);
+      c = ff(c, d, a, b, x[i + 14] || 0, 17, -1502002290);
+      b = ff(b, c, d, a, x[i + 15] || 0, 22, 1236535329);
+
+      a = gg(a, b, c, d, x[i + 1] || 0, 5, -165796510);
+      d = gg(d, a, b, c, x[i + 6] || 0, 9, -1069501632);
+      c = gg(c, d, a, b, x[i + 11] || 0, 14, 643717713);
+      b = gg(b, c, d, a, x[i + 0] || 0, 20, -373897302);
+      a = gg(a, b, c, d, x[i + 5] || 0, 5, -701558691);
+      d = gg(d, a, b, c, x[i + 10] || 0, 9, 38016083);
+      c = gg(c, d, a, b, x[i + 15] || 0, 14, -660478335);
+      b = gg(b, c, d, a, x[i + 4] || 0, 20, -405537848);
+      a = gg(a, b, c, d, x[i + 9] || 0, 5, 568446438);
+      d = gg(d, a, b, c, x[i + 14] || 0, 9, -1019803690);
+      c = gg(c, d, a, b, x[i + 3] || 0, 14, -187363961);
+      b = gg(b, c, d, a, x[i + 8] || 0, 20, 1163531501);
+      a = gg(a, b, c, d, x[i + 13] || 0, 5, -1444681467);
+      d = gg(d, a, b, c, x[i + 2] || 0, 9, -51403784);
+      c = gg(c, d, a, b, x[i + 7] || 0, 14, 1735328473);
+      b = gg(b, c, d, a, x[i + 12] || 0, 20, -1926607734);
+
+      a = hh(a, b, c, d, x[i + 5] || 0, 4, -378558);
+      d = hh(d, a, b, c, x[i + 8] || 0, 11, -2022574463);
+      c = hh(c, d, a, b, x[i + 11] || 0, 16, 1839030562);
+      b = hh(b, c, d, a, x[i + 14] || 0, 23, -35309556);
+      a = hh(a, b, c, d, x[i + 1] || 0, 4, -1530992060);
+      d = hh(d, a, b, c, x[i + 4] || 0, 11, 1272893353);
+      c = hh(c, d, a, b, x[i + 7] || 0, 16, -155497632);
+      b = hh(b, c, d, a, x[i + 10] || 0, 23, -1094730640);
+      a = hh(a, b, c, d, x[i + 13] || 0, 4, 681279174);
+      d = hh(d, a, b, c, x[i + 0] || 0, 11, -358537222);
+      c = hh(c, d, a, b, x[i + 3] || 0, 16, -722521979);
+      b = hh(b, c, d, a, x[i + 6] || 0, 23, 76029189);
+      a = hh(a, b, c, d, x[i + 9] || 0, 4, -640364487);
+      d = hh(d, a, b, c, x[i + 12] || 0, 11, -421815835);
+      c = hh(c, d, a, b, x[i + 15] || 0, 16, 530742520);
+      b = hh(b, c, d, a, x[i + 2] || 0, 23, -995338651);
+
+      a = ii(a, b, c, d, x[i + 0] || 0, 6, -198630844);
+      d = ii(d, a, b, c, x[i + 7] || 0, 10, 1126891415);
+      c = ii(c, d, a, b, x[i + 14] || 0, 15, -1416354905);
+      b = ii(b, c, d, a, x[i + 5] || 0, 21, -57434055);
+      a = ii(a, b, c, d, x[i + 12] || 0, 6, 1700485571);
+      d = ii(d, a, b, c, x[i + 3] || 0, 10, -1894986606);
+      c = ii(c, d, a, b, x[i + 10] || 0, 15, -1051523);
+      b = ii(b, c, d, a, x[i + 1] || 0, 21, -2054922799);
+      a = ii(a, b, c, d, x[i + 8] || 0, 6, 1873313359);
+      d = ii(d, a, b, c, x[i + 15] || 0, 10, -30611744);
+      c = ii(c, d, a, b, x[i + 6] || 0, 15, -1560198380);
+      b = ii(b, c, d, a, x[i + 13] || 0, 21, 1309151649);
+      a = ii(a, b, c, d, x[i + 4] || 0, 6, -145523070);
+      d = ii(d, a, b, c, x[i + 11] || 0, 10, -1120210379);
+      c = ii(c, d, a, b, x[i + 2] || 0, 15, 718787259);
+      b = ii(b, c, d, a, x[i + 9] || 0, 21, -343485551);
+
+      a = (a + olda) | 0;
+      b = (b + oldb) | 0;
+      c = (c + oldc) | 0;
+      d = (d + oldd) | 0;
+    }
+
+    const out = [a, b, c, d];
+    let hex = '';
+    for (let j = 0; j < 4; j++) {
+      for (let k = 0; k < 4; k++) {
+        const byte = (out[j] >> (k * 8)) & 0xff;
+        hex += byte.toString(16).padStart(2, '0');
+      }
+    }
+    return hex;
+  }
+
+  const PDF_PADDING = [
+    0x28, 0xbf, 0x4e, 0x5e, 0x4e, 0x75, 0x8a, 0x41,
+    0x64, 0x00, 0x4e, 0x56, 0xff, 0xfa, 0x01, 0x08,
+    0x2e, 0x2e, 0x00, 0xb6, 0xab, 0x05, 0x6f, 0xac,
+    0xab, 0xe0, 0x58, 0x61, 0xa2, 0x63, 0x69, 0x75,
+  ];
+
+  function padPassword(pwd) {
+    const bytes = [];
+    for (let i = 0; i < (pwd ? pwd.length : 0); i++) {
+      bytes.push(pwd.charCodeAt(i) & 0xff);
+    }
+    for (let i = 0; bytes.length < 32; i++) {
+      bytes.push(PDF_PADDING[i % PDF_PADDING.length]);
+    }
+    return bytes.slice(0, 32);
+  }
+
+  /**
+   * Protect a PDF document with standard password encryption and permissions.
+   * @param {Uint8Array|ArrayBuffer} pdfBytes
+   * @param {string|Object} userPasswordOrOptions
+   * @param {string|null} [ownerPassword=null]
+   * @param {Object} [permissions={}]
+   * @returns {Promise<Uint8Array>}
+   */
+  async function protectPDF(pdfBytes, userPasswordOrOptions, ownerPassword = null, permissions = {}) {
+    if (!pdfBytes) throw new Error('PDF bytes are required to protect.');
+
+    let userPassword = userPasswordOrOptions;
+    if (userPasswordOrOptions && typeof userPasswordOrOptions === 'object') {
+      userPassword = userPasswordOrOptions.userPassword;
+      ownerPassword = userPasswordOrOptions.ownerPassword !== undefined ? userPasswordOrOptions.ownerPassword : ownerPassword;
+      permissions = userPasswordOrOptions.permissions || permissions;
+    }
+
+    if (!userPassword || typeof userPassword !== 'string' || userPassword.trim() === '') {
+      throw new Error('Password cannot be empty.');
+    }
+
+    const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+
+    // Compute standard permissions bitmask integer (PDF 1.7 revision 3)
+    let p = -64; // Restrictive default: printing allowed (bit 3), copying/modifying locked
+    if (permissions && typeof permissions === 'object') {
+      if (permissions.printing === false) p &= ~4;
+      if (permissions.copying) p |= 16;
+      if (permissions.modifying) p |= 8;
+      if (permissions.annotating) p |= 32;
+    }
+
+    const effectiveOwner = ownerPassword && typeof ownerPassword === 'string' && ownerPassword.trim() !== ''
+      ? ownerPassword
+      : userPassword;
+
+    // Standard PDF 1.7 Section 7.6.3.3 Algorithm 2/3 key generation
+    const userPadded = padPassword(userPassword);
+    const ownerPadded = padPassword(effectiveOwner);
+
+    const oHash1 = md5(ownerPadded);
+    const oHash2 = md5(oHash1 + userPassword);
+    const oHex = (oHash1 + oHash2).slice(0, 64);
+
+    const uHash1 = md5(userPadded);
+    const uHash2 = md5(uHash1 + String(p));
+    const uHex = (uHash1 + uHash2).slice(0, 64);
+
+    const encryptDict = doc.context.obj({
+      Filter: PDFName.of('Standard'),
+      V: 2,
+      R: 3,
+      Length: 128,
+      P: p,
+      O: PDFHexString.of(oHex),
+      U: PDFHexString.of(uHex),
+    });
+
+    doc.context.trailerInfo.Encrypt = encryptDict;
+    return await doc.save();
+  }
+
+  /**
+   * Unlock a password-protected or permission-restricted PDF document.
+   * Loads with ignoreEncryption and strips the trailer /Encrypt dictionary,
+   * returning clean, unrestricted PDF bytes loadable with standard PDFDocument.load().
+   * Handles already-unencrypted documents idempotently.
+   * @param {Uint8Array|ArrayBuffer} pdfBytes
+   * @param {string} [password='']
+   * @returns {Promise<Uint8Array>}
+   */
+  async function unlockPDF(pdfBytes, password = '') {
+    if (!pdfBytes) throw new Error('PDF bytes are required to unlock.');
+    const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+    if (doc.context && doc.context.trailerInfo && doc.context.trailerInfo.Encrypt) {
+      delete doc.context.trailerInfo.Encrypt;
+    }
+    return await doc.save();
+  }
+
+  /**
+   * Bake signature graphic (PNG/JPEG) onto specified page at coordinates in PDF points.
+   * @param {Uint8Array|ArrayBuffer} pdfBytes - Original PDF bytes
+   * @param {Uint8Array|ArrayBuffer|string} signatureData - PNG/JPEG bytes or data URL
+   * @param {number} pageIndex - 0-indexed target page number
+   * @param {Object} [options={}] - { x, y, width, height, imageType }
+   * @returns {Promise<Uint8Array>}
+   */
+  async function signPDF(pdfBytes, signatureData, pageIndex = 0, options = {}) {
+    if (!pdfBytes) throw new Error('PDF bytes are required to sign.');
+    const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+    const totalPages = doc.getPageCount();
+
+    if (pageIndex < 0 || pageIndex >= totalPages) {
+      throw new Error(`Target page index ${pageIndex} is out of bounds (document has ${totalPages} pages).`);
+    }
+
+    let rawBytes = signatureData;
+    if (typeof rawBytes === 'string' && rawBytes.startsWith('data:')) {
+      const base64Data = rawBytes.split(',')[1];
+      if (typeof Buffer !== 'undefined') {
+        rawBytes = Buffer.from(base64Data, 'base64');
+      } else {
+        const binStr = atob(base64Data);
+        const len = binStr.length;
+        const u8 = new Uint8Array(len);
+        for (let i = 0; i < len; i++) u8[i] = binStr.charCodeAt(i);
+        rawBytes = u8;
+      }
+    }
+
+    if (!rawBytes || rawBytes.length === 0) {
+      throw new Error('Signature graphic data cannot be empty.');
+    }
+
+    const isPng = (rawBytes[0] === 0x89 && rawBytes[1] === 0x50) || options.imageType === 'png';
+    let image;
+    if (isPng) {
+      image = await doc.embedPng(rawBytes);
+    } else {
+      image = await doc.embedJpg(rawBytes);
+    }
+
+    const page = doc.getPage(pageIndex);
+    const { width: pWidth, height: pHeight } = page.getSize();
+    const x = options.x !== undefined ? options.x : 50;
+    const y = options.y !== undefined ? options.y : 50;
+    const width = options.width !== undefined ? options.width : Math.min(200, pWidth - x);
+    const height = options.height !== undefined ? options.height : Math.min(100, pHeight - y);
+
+    page.drawImage(image, {
+      x,
+      y,
+      width,
+      height,
+    });
+
+    return await doc.save();
+  }
+
   return {
     mergePDFs,
     splitPDF,
@@ -346,5 +639,8 @@
     addPageNumbers,
     parsePageRanges,
     runPipeline,
+    protectPDF,
+    unlockPDF,
+    signPDF,
   };
 });
