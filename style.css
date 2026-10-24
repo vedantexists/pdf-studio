@@ -772,6 +772,194 @@ body {
   z-index: 12;
 }
 
+/* Crop Overlay & Interactive Bounding Box */
+.crop-preview-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+}
+
+.crop-page-nav {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.crop-page-wrapper {
+  position: relative;
+  display: inline-block;
+  background: #ffffff;
+  box-shadow: var(--shadow-md);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  user-select: none;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.crop-page-wrapper canvas {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.crop-overlay {
+  position: absolute;
+  border: 2px dashed #4f46e5;
+  background: rgba(79, 70, 229, 0.08);
+  box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.5);
+  cursor: move;
+  box-sizing: border-box;
+  touch-action: none;
+  z-index: 10;
+}
+
+.crop-overlay-dimensions {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  background: rgba(15, 23, 42, 0.85);
+  color: #ffffff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.15rem 0.45rem;
+  border-radius: 3px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.crop-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: #4f46e5;
+  border: 2px solid #ffffff;
+  border-radius: 2px;
+  box-sizing: border-box;
+  z-index: 12;
+}
+
+.crop-handle.handle-nw { top: -5px; left: -5px; cursor: nwse-resize; }
+.crop-handle.handle-ne { top: -5px; right: -5px; cursor: nesw-resize; }
+.crop-handle.handle-sw { bottom: -5px; left: -5px; cursor: nesw-resize; }
+.crop-handle.handle-se { bottom: -5px; right: -5px; cursor: nwse-resize; }
+.crop-handle.handle-n { top: -5px; left: calc(50% - 5px); cursor: ns-resize; }
+.crop-handle.handle-s { bottom: -5px; left: calc(50% - 5px); cursor: ns-resize; }
+.crop-handle.handle-w { top: calc(50% - 5px); left: -5px; cursor: ew-resize; }
+.crop-handle.handle-e { top: calc(50% - 5px); right: -5px; cursor: ew-resize; }
+
+/* PDF Forms Field List Styles */
+.form-fields-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  max-height: 460px;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.form-field-card {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.form-field-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.form-field-name {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-main);
+  word-break: break-all;
+}
+
+.form-field-type {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  background: #e0e7ff;
+  color: #4338ca;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+}
+
+.form-field-input {
+  width: 100%;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 0.88rem;
+  background: #ffffff;
+  color: var(--text-main);
+}
+
+.form-field-input:focus {
+  outline: 2px solid var(--primary);
+  border-color: var(--primary);
+}
+
+/* Page Selection Badges for Dedicated Remove & Extract Tools */
+.page-thumb-card.selected-for-remove {
+  border-color: #ef4444 !important;
+  background-color: #fef2f2 !important;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.3) !important;
+}
+
+.page-thumb-card.selected-for-extract {
+  border-color: #4f46e5 !important;
+  background-color: #eef2ff !important;
+  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.3) !important;
+}
+
+.page-select-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.2rem 0.5rem;
+  border-radius: 9999px;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s ease;
+}
+
+.page-select-badge.remove-badge {
+  background: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fca5a5;
+}
+
+.page-select-badge.remove-badge.active {
+  background: #ef4444;
+  color: #ffffff;
+  border-color: #dc2626;
+}
+
+.page-select-badge.extract-badge {
+  background: #e0e7ff;
+  color: #4338ca;
+  border: 1px solid #a5b4fc;
+}
+
+.page-select-badge.extract-badge.active {
+  background: #4f46e5;
+  color: #ffffff;
+  border-color: #4338ca;
+}
+
 @media (max-width: 960px) {
   .mega-nav {
     display: none;

@@ -53,6 +53,21 @@ document.addEventListener('DOMContentLoaded', () => {
   let sigFont = "'Dancing Script', cursive";
   let hasDrawn = false;
 
+  // Crop Tool State
+  let cropCurrentPageIndex = 0;
+  let cropOverlayPos = { left: 30, top: 30, width: 320, height: 420 };
+  let cropPageSize = { width: 612, height: 792 };
+  let isDraggingCrop = false;
+  let activeCropResizeHandle = null;
+  let cropDragStart = { x: 0, y: 0, left: 30, top: 30, width: 320, height: 420 };
+
+  // PDF Forms State
+  let inspectedFormFields = [];
+
+  // Dedicated Page Selection Sets (1-based page numbers)
+  let selectedRemovePages = new Set();
+  let selectedExtractPages = new Set();
+
   // Complete Tools Registry
   const TOOLS = {
     'merge': {
@@ -240,9 +255,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  function cleanupWorkspaceCustomContainers() {
+    const signExisting = document.getElementById('signPreviewContainer');
+    if (signExisting) signExisting.remove();
+    const cropExisting = document.getElementById('cropPreviewContainer');
+    if (cropExisting) cropExisting.remove();
+  }
+
   function removeSignPreview() {
-    const existing = document.getElementById('signPreviewContainer');
-    if (existing) existing.remove();
+    cleanupWorkspaceCustomContainers();
   }
 
   // --- Navigation & Routing ---
@@ -521,6 +542,27 @@ document.addEventListener('DOMContentLoaded', () => {
       workArea.style.display = 'block';
       hideStatus();
 
+      // Auto-inspect form fields on file load
+      if ((currentTool === 'forms' || currentTool === 'pdf-forms') && uploadedFiles.length > 0) {
+        try {
+          inspectedFormFields = await PDFCore.inspectForm(uploadedFiles[0].bytes.slice());
+        } catch (fErr) {
+          console.warn('Form inspection error:', fErr);
+          inspectedFormFields = [];
+        }
+      }
+      if (currentTool === 'remove-pages') {
+        selectedRemovePages.clear();
+      }
+      if (currentTool === 'extract-pages' && uploadedFiles.length > 0) {
+        const total = uploadedFiles[0].pageCount || 1;
+        selectedExtractPages = new Set(Array.from({ length: total }, (_, i) => i + 1));
+      }
+      if (currentTool === 'crop' || currentTool === 'crop-pdf') {
+        cropCurrentPageIndex = 0;
+        cropOverlayPos = { left: 30, top: 30, width: 320, height: 420 };
+      }
+
       // Render workspace
       renderToolWorkspace();
     } catch (err) {
@@ -542,7 +584,15 @@ document.addEventListener('DOMContentLoaded', () => {
     } else if (currentTool === 'sign' || currentTool === 'sign-pdf') {
       filesList.style.display = 'none';
       pagesGrid.style.display = 'none';
+      const cropExisting = document.getElementById('cropPreviewContainer');
+      if (cropExisting) cropExisting.remove();
       await renderSignPreview();
+    } else if (currentTool === 'crop' || currentTool === 'crop-pdf') {
+      filesList.style.display = 'none';
+      pagesGrid.style.display = 'none';
+      const signExisting = document.getElementById('signPreviewContainer');
+      if (signExisting) signExisting.remove();
+      await renderCropPreview();
     } else {
       // Single PDF visual pages grid
       removeSignPreview();
@@ -769,6 +819,256 @@ document.addEventListener('DOMContentLoaded', () => {
     if (ptH) ptH.textContent = pdfHpt;
   }
 
+  // --- Crop PDF Interactive Visual Bounding Box ---
+  async function renderCropPreview() {
+    pagesGrid.style.display = 'none';
+    filesList.style.display = 'none';
+
+    let container = document.getElementById('cropPreviewContainer');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'cropPreviewContainer';
+      container.className = 'crop-preview-container';
+      document.getElementById('itemsContainer').appendChild(container);
+    }
+
+    const file = uploadedFiles[0];
+    const totalPages = file ? file.pageCount || 1 : 1;
+    if (cropCurrentPageIndex >= totalPages) cropCurrentPageIndex = 0;
+
+    container.innerHTML = `
+      <div class="crop-page-nav">
+        <button type="button" class="secondary-btn" id="cropPrevPageBtn" ${cropCurrentPageIndex === 0 ? 'disabled style="opacity:0.4;"' : ''}>← Prev Page</button>
+        <span id="cropPageIndicator">Page ${cropCurrentPageIndex + 1} of ${totalPages}</span>
+        <button type="button" class="secondary-btn" id="cropNextPageBtn" ${cropCurrentPageIndex >= totalPages - 1 ? 'disabled style="opacity:0.4;"' : ''}>Next Page →</button>
+      </div>
+      <div id="cropPageWrapper" class="crop-page-wrapper">
+        <canvas id="cropPageCanvas"></canvas>
+        <div id="cropOverlay" class="crop-overlay" style="left: ${cropOverlayPos.left}px; top: ${cropOverlayPos.top}px; width: ${cropOverlayPos.width}px; height: ${cropOverlayPos.height}px;">
+          <div id="cropDimensionsBadge" class="crop-overlay-dimensions">0 × 0 pt</div>
+          <div class="crop-handle handle-nw" data-handle="nw"></div>
+          <div class="crop-handle handle-ne" data-handle="ne"></div>
+          <div class="crop-handle handle-sw" data-handle="sw"></div>
+          <div class="crop-handle handle-se" data-handle="se"></div>
+          <div class="crop-handle handle-n" data-handle="n"></div>
+          <div class="crop-handle handle-s" data-handle="s"></div>
+          <div class="crop-handle handle-w" data-handle="w"></div>
+          <div class="crop-handle handle-e" data-handle="e"></div>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('cropPrevPageBtn').addEventListener('click', async () => {
+      if (cropCurrentPageIndex > 0) {
+        cropCurrentPageIndex--;
+        await renderCropPreview();
+        renderSettingsPanel();
+      }
+    });
+
+    document.getElementById('cropNextPageBtn').addEventListener('click', async () => {
+      if (cropCurrentPageIndex < totalPages - 1) {
+        cropCurrentPageIndex++;
+        await renderCropPreview();
+        renderSettingsPanel();
+      }
+    });
+
+    setupCropOverlayInteractions();
+    await renderCropPageCanvas(file, cropCurrentPageIndex + 1);
+    updateCropCoordinateDisplay();
+  }
+
+  async function renderCropPageCanvas(file, pageNum) {
+    const canvas = document.getElementById('cropPageCanvas');
+    if (!canvas || !file || !file.bytes) return;
+
+    if (window.pdfjsLib) {
+      try {
+        if (!window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
+          window.pdfjsLib.GlobalWorkerOptions.workerSrc = window.location.protocol.startsWith('http')
+            ? 'node_modules/pdfjs-dist/build/pdf.worker.min.js'
+            : 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        }
+        const clonedBytes = file.bytes.slice();
+        const pdf = await window.pdfjsLib.getDocument({ data: clonedBytes }).promise;
+        const page = await pdf.getPage(pageNum);
+        const originalViewport = page.getViewport({ scale: 1.0 });
+        cropPageSize = { width: originalViewport.width, height: originalViewport.height };
+
+        const targetWidth = Math.min(560, window.innerWidth - 80);
+        const scale = targetWidth / originalViewport.width;
+        const viewport = page.getViewport({ scale });
+
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const ctx = canvas.getContext('2d');
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        return;
+      } catch (err) {
+        console.warn('PDF.js render in crop preview failed, using canvas fallback:', err);
+      }
+    }
+
+    // Fallback
+    canvas.width = 500;
+    canvas.height = 700;
+    cropPageSize = { width: 500, height: 700 };
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.strokeRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#1e293b';
+    ctx.font = 'bold 24px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`Page ${pageNum}`, 250, 350);
+  }
+
+  function setupCropOverlayInteractions() {
+    const overlay = document.getElementById('cropOverlay');
+    const canvas = document.getElementById('cropPageCanvas');
+    if (!overlay || !canvas) return;
+
+    // Drag overlay bounding box
+    overlay.onpointerdown = (e) => {
+      if (e.target.classList.contains('crop-handle')) return;
+      e.preventDefault();
+      isDraggingCrop = true;
+      cropDragStart = {
+        x: e.clientX,
+        y: e.clientY,
+        left: cropOverlayPos.left,
+        top: cropOverlayPos.top,
+      };
+      overlay.setPointerCapture(e.pointerId);
+    };
+
+    overlay.onpointermove = (e) => {
+      if (!isDraggingCrop) return;
+      e.preventDefault();
+      const dx = e.clientX - cropDragStart.x;
+      const dy = e.clientY - cropDragStart.y;
+      const maxLeft = Math.max(0, canvas.clientWidth - cropOverlayPos.width);
+      const maxTop = Math.max(0, canvas.clientHeight - cropOverlayPos.height);
+
+      cropOverlayPos.left = Math.max(0, Math.min(maxLeft, cropDragStart.left + dx));
+      cropOverlayPos.top = Math.max(0, Math.min(maxTop, cropDragStart.top + dy));
+
+      overlay.style.left = `${cropOverlayPos.left}px`;
+      overlay.style.top = `${cropOverlayPos.top}px`;
+      updateCropCoordinateDisplay();
+    };
+
+    const stopDraggingCrop = (e) => {
+      if (isDraggingCrop) {
+        isDraggingCrop = false;
+        try { overlay.releasePointerCapture(e.pointerId); } catch {}
+      }
+    };
+    overlay.onpointerup = stopDraggingCrop;
+    overlay.onpointercancel = stopDraggingCrop;
+
+    // Resizing with 8 handles
+    overlay.querySelectorAll('.crop-handle').forEach((handle) => {
+      handle.onpointerdown = (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        activeCropResizeHandle = handle.dataset.handle;
+        cropDragStart = {
+          x: e.clientX,
+          y: e.clientY,
+          left: cropOverlayPos.left,
+          top: cropOverlayPos.top,
+          width: cropOverlayPos.width,
+          height: cropOverlayPos.height,
+        };
+        handle.setPointerCapture(e.pointerId);
+      };
+
+      handle.onpointermove = (e) => {
+        if (!activeCropResizeHandle) return;
+        e.preventDefault();
+        const dx = e.clientX - cropDragStart.x;
+        const dy = e.clientY - cropDragStart.y;
+        const minDim = 30;
+        const cWidth = canvas.clientWidth;
+        const cHeight = canvas.clientHeight;
+
+        let newLeft = cropDragStart.left;
+        let newTop = cropDragStart.top;
+        let newWidth = cropDragStart.width;
+        let newHeight = cropDragStart.height;
+
+        if (activeCropResizeHandle.includes('e')) {
+          newWidth = Math.max(minDim, Math.min(cWidth - newLeft, cropDragStart.width + dx));
+        }
+        if (activeCropResizeHandle.includes('s')) {
+          newHeight = Math.max(minDim, Math.min(cHeight - newTop, cropDragStart.height + dy));
+        }
+        if (activeCropResizeHandle.includes('w')) {
+          const proposedLeft = Math.max(0, Math.min(cropDragStart.left + cropDragStart.width - minDim, cropDragStart.left + dx));
+          newWidth = cropDragStart.width + (cropDragStart.left - proposedLeft);
+          newLeft = proposedLeft;
+        }
+        if (activeCropResizeHandle.includes('n')) {
+          const proposedTop = Math.max(0, Math.min(cropDragStart.top + cropDragStart.height - minDim, cropDragStart.top + dy));
+          newHeight = cropDragStart.height + (cropDragStart.top - proposedTop);
+          newTop = proposedTop;
+        }
+
+        cropOverlayPos.left = Math.round(newLeft);
+        cropOverlayPos.top = Math.round(newTop);
+        cropOverlayPos.width = Math.round(newWidth);
+        cropOverlayPos.height = Math.round(newHeight);
+
+        overlay.style.left = `${cropOverlayPos.left}px`;
+        overlay.style.top = `${cropOverlayPos.top}px`;
+        overlay.style.width = `${cropOverlayPos.width}px`;
+        overlay.style.height = `${cropOverlayPos.height}px`;
+        updateCropCoordinateDisplay();
+      };
+
+      const stopResizingCrop = (e) => {
+        if (activeCropResizeHandle) {
+          activeCropResizeHandle = null;
+          try { handle.releasePointerCapture(e.pointerId); } catch {}
+        }
+      };
+      handle.onpointerup = stopResizingCrop;
+      handle.onpointercancel = stopResizingCrop;
+    });
+  }
+
+  function updateCropCoordinateDisplay() {
+    const canvas = document.getElementById('cropPageCanvas');
+    if (!canvas) return;
+    const prevW = canvas.clientWidth || canvas.width || 1;
+    const prevH = canvas.clientHeight || canvas.height || 1;
+    const pdfW = cropPageSize.width || 612;
+    const pdfH = cropPageSize.height || 792;
+
+    const scaleX = pdfW / prevW;
+    const scaleY = pdfH / prevH;
+
+    const pdfX = Math.round(cropOverlayPos.left * scaleX);
+    const pdfY = Math.round(pdfH - (cropOverlayPos.top + cropOverlayPos.height) * scaleY);
+    const pdfWpt = Math.round(cropOverlayPos.width * scaleX);
+    const pdfHpt = Math.round(cropOverlayPos.height * scaleY);
+
+    const ptX = document.getElementById('cropPtX');
+    const ptY = document.getElementById('cropPtY');
+    const ptW = document.getElementById('cropPtW');
+    const ptH = document.getElementById('cropPtH');
+    if (ptX) ptX.textContent = pdfX;
+    if (ptY) ptY.textContent = pdfY;
+    if (ptW) ptW.textContent = pdfWpt;
+    if (ptH) ptH.textContent = pdfHpt;
+
+    const badge = document.getElementById('cropDimensionsBadge');
+    if (badge) badge.textContent = `${pdfWpt} × ${pdfHpt} pt`;
+  }
+
   function renderFileList() {
     filesList.innerHTML = '';
     uploadedFiles.forEach((item, index) => {
@@ -840,6 +1140,22 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  function syncRemovePagesInput() {
+    const input = document.getElementById('removePagesInput');
+    if (input) {
+      const sorted = Array.from(selectedRemovePages).sort((a, b) => a - b);
+      input.value = sorted.join(', ');
+    }
+  }
+
+  function syncExtractPagesInput() {
+    const input = document.getElementById('extractPagesInput');
+    if (input) {
+      const sorted = Array.from(selectedExtractPages).sort((a, b) => a - b);
+      input.value = sorted.join(', ');
+    }
+  }
+
   // --- Render Page Thumbnails with PDF.js or Fallback ---
   async function renderPageThumbnails() {
     pagesGrid.innerHTML = '';
@@ -868,12 +1184,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
     for (let i = 0; i < total; i++) {
       const pageData = activePages[i];
-      const card = document.createElement('div');
-      card.className = `page-thumb-card ${pageData.isDeleted ? 'deleted' : ''}`;
-      card.id = `pageCard-${i}`;
-
       const isOrganize = currentTool === 'organize';
       const isRotate = currentTool === 'rotate';
+      const isRemovePages = currentTool === 'remove-pages';
+      const isExtractPages = currentTool === 'extract-pages';
+
+      const isSelectedRemove = isRemovePages && selectedRemovePages.has(pageData.pageNum);
+      const isSelectedExtract = isExtractPages && selectedExtractPages.has(pageData.pageNum);
+
+      const removeBadgeHtml = isRemovePages ? `
+        <span class="page-select-badge remove-badge ${isSelectedRemove ? 'active' : ''}" data-action="toggle-remove" data-page="${pageData.pageNum}">
+          ${isSelectedRemove ? '✕ Remove' : 'Keep'}
+        </span>
+      ` : '';
+
+      const extractBadgeHtml = isExtractPages ? `
+        <span class="page-select-badge extract-badge ${isSelectedExtract ? 'active' : ''}" data-action="toggle-extract" data-page="${pageData.pageNum}">
+          ${isSelectedExtract ? '✓ Extract' : 'Skip'}
+        </span>
+      ` : '';
+
+      const card = document.createElement('div');
+      card.className = `page-thumb-card ${pageData.isDeleted ? 'deleted' : ''} ${isSelectedRemove ? 'selected-for-remove' : ''} ${isSelectedExtract ? 'selected-for-extract' : ''}`;
+      card.id = `pageCard-${i}`;
 
       card.innerHTML = `
         <div class="page-canvas-wrapper" id="canvasWrapper-${i}">
@@ -881,6 +1214,8 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
         <div class="page-meta">
           <span>Page ${pageData.pageNum}</span>
+          ${removeBadgeHtml}
+          ${extractBadgeHtml}
           <div class="page-card-actions">
             ${isOrganize && i > 0 ? `<button type="button" class="icon-btn" title="Move Left" data-action="move-left" data-index="${i}">←</button>` : ''}
             ${isOrganize && i < total - 1 ? `<button type="button" class="icon-btn" title="Move Right" data-action="move-right" data-index="${i}">→</button>` : ''}
@@ -889,6 +1224,32 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>
       `;
+
+      if (isRemovePages) {
+        card.style.cursor = 'pointer';
+        card.addEventListener('click', (e) => {
+          if (e.target.closest('.icon-btn')) return;
+          if (selectedRemovePages.has(pageData.pageNum)) {
+            selectedRemovePages.delete(pageData.pageNum);
+          } else {
+            selectedRemovePages.add(pageData.pageNum);
+          }
+          syncRemovePagesInput();
+          renderPageThumbnails();
+        });
+      } else if (isExtractPages) {
+        card.style.cursor = 'pointer';
+        card.addEventListener('click', (e) => {
+          if (e.target.closest('.icon-btn')) return;
+          if (selectedExtractPages.has(pageData.pageNum)) {
+            selectedExtractPages.delete(pageData.pageNum);
+          } else {
+            selectedExtractPages.add(pageData.pageNum);
+          }
+          syncExtractPagesInput();
+          renderPageThumbnails();
+        });
+      }
 
       pagesGrid.appendChild(card);
 
@@ -1164,21 +1525,92 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
       `;
     } else if (currentTool === 'remove-pages') {
+      const sorted = Array.from(selectedRemovePages).sort((a, b) => a - b);
       toolSettings.innerHTML = `
         <div class="setting-group">
           <label for="removePagesInput">Pages to Remove</label>
-          <input type="text" id="removePagesInput" placeholder="e.g. 1, 3-5">
-          <p class="setting-hint">Enter comma-separated page numbers or ranges to remove.</p>
+          <input type="text" id="removePagesInput" placeholder="e.g. 1, 3-5" value="${sorted.join(', ')}">
+          <p class="setting-hint">Click thumbnails to select pages, or enter comma-separated numbers/ranges (1-${totalPages}).</p>
+        </div>
+        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem;">
+          <button type="button" class="secondary-btn" id="rmClearBtn" style="flex:1;">Clear</button>
+          <button type="button" class="secondary-btn" id="rmEvenBtn" style="flex:1;">Even</button>
+          <button type="button" class="secondary-btn" id="rmOddBtn" style="flex:1;">Odd</button>
         </div>
       `;
+
+      const input = document.getElementById('removePagesInput');
+      input?.addEventListener('input', () => {
+        const val = input.value.trim();
+        const indices = PDFCore.parsePageRanges(val, totalPages);
+        selectedRemovePages = new Set(indices.map(i => i + 1));
+        renderPageThumbnails();
+      });
+
+      document.getElementById('rmClearBtn')?.addEventListener('click', () => {
+        selectedRemovePages.clear();
+        syncRemovePagesInput();
+        renderPageThumbnails();
+      });
+
+      document.getElementById('rmEvenBtn')?.addEventListener('click', () => {
+        selectedRemovePages = new Set(Array.from({ length: totalPages }, (_, i) => i + 1).filter(p => p % 2 === 0));
+        syncRemovePagesInput();
+        renderPageThumbnails();
+      });
+
+      document.getElementById('rmOddBtn')?.addEventListener('click', () => {
+        selectedRemovePages = new Set(Array.from({ length: totalPages }, (_, i) => i + 1).filter(p => p % 2 !== 0));
+        syncRemovePagesInput();
+        renderPageThumbnails();
+      });
     } else if (currentTool === 'extract-pages') {
+      const sorted = Array.from(selectedExtractPages).sort((a, b) => a - b);
       toolSettings.innerHTML = `
         <div class="setting-group">
           <label for="extractPagesInput">Pages to Extract</label>
-          <input type="text" id="extractPagesInput" placeholder="e.g. 1, 3-5">
-          <p class="setting-hint">Enter page ranges to extract into a new standalone PDF.</p>
+          <input type="text" id="extractPagesInput" placeholder="e.g. 1, 3-5" value="${sorted.join(', ')}">
+          <p class="setting-hint">Click thumbnails to select pages, or enter comma-separated numbers/ranges (1-${totalPages}).</p>
+        </div>
+        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem;">
+          <button type="button" class="secondary-btn" id="extAllBtn" style="flex:1;">All</button>
+          <button type="button" class="secondary-btn" id="extClearBtn" style="flex:1;">Clear</button>
+          <button type="button" class="secondary-btn" id="extOddBtn" style="flex:1;">Odd</button>
+          <button type="button" class="secondary-btn" id="extEvenBtn" style="flex:1;">Even</button>
         </div>
       `;
+
+      const input = document.getElementById('extractPagesInput');
+      input?.addEventListener('input', () => {
+        const val = input.value.trim();
+        const indices = PDFCore.parsePageRanges(val, totalPages);
+        selectedExtractPages = new Set(indices.map(i => i + 1));
+        renderPageThumbnails();
+      });
+
+      document.getElementById('extAllBtn')?.addEventListener('click', () => {
+        selectedExtractPages = new Set(Array.from({ length: totalPages }, (_, i) => i + 1));
+        syncExtractPagesInput();
+        renderPageThumbnails();
+      });
+
+      document.getElementById('extClearBtn')?.addEventListener('click', () => {
+        selectedExtractPages.clear();
+        syncExtractPagesInput();
+        renderPageThumbnails();
+      });
+
+      document.getElementById('extOddBtn')?.addEventListener('click', () => {
+        selectedExtractPages = new Set(Array.from({ length: totalPages }, (_, i) => i + 1).filter(p => p % 2 !== 0));
+        syncExtractPagesInput();
+        renderPageThumbnails();
+      });
+
+      document.getElementById('extEvenBtn')?.addEventListener('click', () => {
+        selectedExtractPages = new Set(Array.from({ length: totalPages }, (_, i) => i + 1).filter(p => p % 2 === 0));
+        syncExtractPagesInput();
+        renderPageThumbnails();
+      });
     } else if (currentTool === 'crop' || currentTool === 'crop-pdf') {
       toolSettings.innerHTML = `
         <div class="setting-group">
@@ -1186,24 +1618,150 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="radio-group">
             <label class="radio-option">
               <input type="radio" name="cropScope" value="all" checked>
-              <span>Apply to all pages</span>
+              <span>Apply to all pages (${totalPages} pages)</span>
             </label>
             <label class="radio-option">
               <input type="radio" name="cropScope" value="current">
-              <span>Apply to current page only</span>
+              <span>Apply to current page only (Page ${cropCurrentPageIndex + 1})</span>
             </label>
           </div>
         </div>
-      `;
-    } else if (currentTool === 'forms' || currentTool === 'pdf-forms') {
-      toolSettings.innerHTML = `
-        <div class="setting-group">
-          <label>Form Fields</label>
-          <div id="formFieldsContainer">
-            <p class="setting-hint">Interactive form controls will appear here.</p>
+        <div class="setting-group" style="margin-top: 0.75rem;">
+          <label>Crop Boundaries (PDF Points)</label>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; font-size: 0.85rem; background: #f8fafc; padding: 0.6rem; border-radius: var(--radius-sm); border: 1px solid var(--border);">
+            <div>X: <strong id="cropPtX">0</strong> pt</div>
+            <div>Y: <strong id="cropPtY">0</strong> pt</div>
+            <div>W: <strong id="cropPtW">0</strong> pt</div>
+            <div>H: <strong id="cropPtH">0</strong> pt</div>
+          </div>
+        </div>
+        <div class="setting-group" style="margin-top: 0.75rem;">
+          <label>Quick Presets</label>
+          <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+            <button type="button" class="secondary-btn" id="cropPresetResetBtn" style="flex:1;">Full Page</button>
+            <button type="button" class="secondary-btn" id="cropPresetMarginBtn" style="flex:1;">10% Margins</button>
           </div>
         </div>
       `;
+
+      document.getElementById('cropPresetResetBtn')?.addEventListener('click', () => {
+        const canvas = document.getElementById('cropPageCanvas');
+        if (!canvas) return;
+        cropOverlayPos = { left: 0, top: 0, width: canvas.clientWidth, height: canvas.clientHeight };
+        const overlay = document.getElementById('cropOverlay');
+        if (overlay) {
+          overlay.style.left = '0px';
+          overlay.style.top = '0px';
+          overlay.style.width = `${canvas.clientWidth}px`;
+          overlay.style.height = `${canvas.clientHeight}px`;
+        }
+        updateCropCoordinateDisplay();
+      });
+
+      document.getElementById('cropPresetMarginBtn')?.addEventListener('click', () => {
+        const canvas = document.getElementById('cropPageCanvas');
+        if (!canvas) return;
+        const mx = Math.round(canvas.clientWidth * 0.1);
+        const my = Math.round(canvas.clientHeight * 0.1);
+        cropOverlayPos = {
+          left: mx,
+          top: my,
+          width: Math.max(40, canvas.clientWidth - mx * 2),
+          height: Math.max(40, canvas.clientHeight - my * 2),
+        };
+        const overlay = document.getElementById('cropOverlay');
+        if (overlay) {
+          overlay.style.left = `${cropOverlayPos.left}px`;
+          overlay.style.top = `${cropOverlayPos.top}px`;
+          overlay.style.width = `${cropOverlayPos.width}px`;
+          overlay.style.height = `${cropOverlayPos.height}px`;
+        }
+        updateCropCoordinateDisplay();
+      });
+
+      updateCropCoordinateDisplay();
+    } else if (currentTool === 'forms' || currentTool === 'pdf-forms') {
+      function escapeHtml(str) {
+        if (typeof str !== 'string') return String(str ?? '');
+        return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      }
+
+      let fieldsHtml = '';
+      if (!inspectedFormFields || inspectedFormFields.length === 0) {
+        fieldsHtml = `
+          <div style="background: #f8fafc; border: 1px dashed var(--border); border-radius: var(--radius-sm); padding: 1.25rem; text-align: center; color: var(--text-muted); font-size: 0.9rem;">
+            <span style="font-size: 1.5rem; display: block; margin-bottom: 0.25rem;">📄</span>
+            No interactive AcroForm fields found in this document.
+          </div>
+        `;
+      } else {
+        fieldsHtml = `
+          <div class="form-fields-list">
+            ${inspectedFormFields.map((f) => {
+              let inputControl = '';
+              if (f.type === 'checkbox') {
+                inputControl = `
+                  <label class="radio-option" style="margin-top: 0.25rem;">
+                    <input type="checkbox" class="form-field-input" data-field-name="${escapeHtml(f.name)}" ${f.value ? 'checked' : ''}>
+                    <span>${f.value ? 'Checked' : 'Unchecked'}</span>
+                  </label>
+                `;
+              } else if (f.type === 'dropdown' || f.type === 'radio' || f.type === 'optionlist') {
+                const opts = Array.isArray(f.options) ? f.options : [];
+                const currentVal = Array.isArray(f.value) ? f.value[0] : f.value;
+                inputControl = `
+                  <select class="form-field-input" data-field-name="${escapeHtml(f.name)}">
+                    ${opts.map((opt) => `<option value="${escapeHtml(opt)}" ${opt === currentVal ? 'selected' : ''}>${escapeHtml(opt)}</option>`).join('')}
+                  </select>
+                `;
+              } else {
+                inputControl = `
+                  <input type="text" class="form-field-input" data-field-name="${escapeHtml(f.name)}" value="${escapeHtml(f.value || '')}" placeholder="Value">
+                `;
+              }
+
+              return `
+                <div class="form-field-card">
+                  <div class="form-field-header">
+                    <span class="form-field-name">${escapeHtml(f.name)}</span>
+                    <span class="form-field-type">${escapeHtml(f.type)}</span>
+                  </div>
+                  ${inputControl}
+                </div>
+              `;
+            }).join('')}
+          </div>
+        `;
+      }
+
+      toolSettings.innerHTML = `
+        <div class="setting-group">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
+            <label>Form Fields (${inspectedFormFields.length})</label>
+            <span class="setting-hint">${inspectedFormFields.length} detected</span>
+          </div>
+          ${fieldsHtml}
+        </div>
+        <div class="setting-group" style="margin-top: 1rem;">
+          <button type="button" class="primary-btn" id="saveInteractiveFormBtn" style="width: 100%; justify-content: center;">
+            <span>💾 Save Interactive Form</span>
+          </button>
+          <button type="button" class="secondary-btn" id="saveFlattenFormBtn" style="width: 100%; justify-content: center; margin-top: 0.5rem; border-color: #f59e0b; color: #b45309; font-weight: 700;">
+            <span>⚡ Save & Flatten Form</span>
+          </button>
+          <span class="setting-hint" style="text-align: center; margin-top: 0.35rem;">
+            Flattening permanently bakes responses into page graphics.
+          </span>
+        </div>
+      `;
+
+      document.getElementById('saveInteractiveFormBtn')?.addEventListener('click', () => {
+        executeFormAction(false);
+      });
+
+      document.getElementById('saveFlattenFormBtn')?.addEventListener('click', () => {
+        executeFormAction(true);
+      });
     } else if (currentTool === 'unlock' || currentTool === 'unlock-pdf') {
       toolSettings.innerHTML = `
         <div class="setting-group">
