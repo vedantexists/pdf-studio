@@ -2,11 +2,11 @@
 
 > **100% private, in-browser PDF manipulation suite. Zero server uploads.**
 
-[![Live Demo](https://img.shields.io/badge/demo-online-brightgreen.svg)](https://vedantexists.github.io/pdftool/)
+[![Live Demo](https://img.shields.io/badge/demo-online-brightgreen.svg)](https://vedantexists.github.io/pdf-studio/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Privacy: 100% Local](https://img.shields.io/badge/privacy-100%25%20local-emerald.svg)](#-100-in-browser-privacy)
 
-🌐 **Live Studio**: [https://vedantexists.github.io/pdftool/](https://vedantexists.github.io/pdftool/)
+🌐 **Live Studio**: [https://vedantexists.github.io/pdftool/](https://vedantexists.github.io/pdf-studio/)
 
 ---
 
