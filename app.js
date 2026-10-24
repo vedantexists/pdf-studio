@@ -1842,6 +1842,41 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  // --- Form Action Execution Helper ---
+  async function executeFormAction(flatten) {
+    if (uploadedFiles.length === 0) return;
+    if (isProcessing) return;
+
+    isProcessing = true;
+    executeBtn.disabled = true;
+    showStatus(flatten ? 'Flattening and saving form...' : 'Saving filled form...', 'processing');
+
+    try {
+      const srcBytes = uploadedFiles[0].bytes.slice();
+      const fieldValues = {};
+      toolSettings.querySelectorAll('.form-field-input').forEach((input) => {
+        const name = input.dataset.fieldName;
+        if (!name) return;
+        if (input.type === 'checkbox') {
+          fieldValues[name] = input.checked;
+        } else {
+          fieldValues[name] = input.value;
+        }
+      });
+
+      const resultBytes = await PDFCore.fillForm(srcBytes, fieldValues, flatten);
+      const outFilename = flatten ? 'flattened_form.pdf' : 'filled_form.pdf';
+      downloadFile(resultBytes, outFilename, 'application/pdf');
+      showSuccess(flatten ? 'Form successfully flattened and saved!' : 'Interactive form saved successfully!');
+    } catch (err) {
+      console.error(err);
+      showStatus(err.message || 'Error processing form.', 'error');
+    } finally {
+      isProcessing = false;
+      executeBtn.disabled = false;
+    }
+  }
+
   // --- Execution Handlers ---
   executeBtn.addEventListener('click', async () => {
     if (isProcessing) return;
@@ -2039,25 +2074,39 @@ document.addEventListener('DOMContentLoaded', () => {
         const srcBytes = uploadedFiles[0].bytes.slice();
         const total = uploadedFiles[0].pageCount || 1;
         const inputVal = (document.getElementById('extractPagesInput')?.value || '').trim();
-        let indices = inputVal ? PDFCore.parsePageRanges(inputVal, total) : Array.from({ length: total }, (_, i) => i);
+        let indices = [];
+        if (inputVal) {
+          indices = PDFCore.parsePageRanges(inputVal, total);
+        } else if (selectedExtractPages.size > 0) {
+          indices = Array.from(selectedExtractPages).map(p => p - 1).filter(i => i >= 0 && i < total).sort((a, b) => a - b);
+        } else {
+          indices = Array.from({ length: total }, (_, i) => i);
+        }
+        if (indices.length === 0) {
+          throw new Error('Please select at least one page to extract.');
+        }
         const extractedBytes = await PDFCore.extractPages(srcBytes, indices);
         downloadFile(extractedBytes, 'extracted.pdf', 'application/pdf');
-        showSuccess('Pages extracted successfully!');
+        showSuccess(`Extracted ${indices.length} pages into extracted.pdf!`);
       } else if (currentTool === 'remove-pages') {
         const srcBytes = uploadedFiles[0].bytes.slice();
         const total = uploadedFiles[0].pageCount || 1;
         const inputVal = (document.getElementById('removePagesInput')?.value || '').trim();
-        let indicesToRemove = inputVal ? PDFCore.parsePageRanges(inputVal, total) : [];
-        if (PDFCore.removePages) {
-          const resultBytes = await PDFCore.removePages(srcBytes, indicesToRemove);
-          downloadFile(resultBytes, 'removed_pages.pdf', 'application/pdf');
-          showSuccess('Pages removed successfully!');
-        } else {
-          const toKeep = Array.from({ length: total }, (_, i) => i).filter((i) => !indicesToRemove.includes(i));
-          const resultBytes = await PDFCore.extractPages(srcBytes, toKeep);
-          downloadFile(resultBytes, 'removed_pages.pdf', 'application/pdf');
-          showSuccess('Pages removed successfully!');
+        let indicesToRemove = [];
+        if (inputVal) {
+          indicesToRemove = PDFCore.parsePageRanges(inputVal, total);
+        } else if (selectedRemovePages.size > 0) {
+          indicesToRemove = Array.from(selectedRemovePages).map(p => p - 1).filter(i => i >= 0 && i < total).sort((a, b) => a - b);
         }
+        if (indicesToRemove.length === 0) {
+          throw new Error('Please select at least one page to remove.');
+        }
+        if (indicesToRemove.length >= total) {
+          throw new Error('Cannot remove all pages: at least one page must remain in the document.');
+        }
+        const resultBytes = await PDFCore.removePages(srcBytes, indicesToRemove);
+        downloadFile(resultBytes, 'removed_pages.pdf', 'application/pdf');
+        showSuccess(`Removed ${indicesToRemove.length} page(s) successfully!`);
       } else if (currentTool === 'protect' || currentTool === 'protect-pdf') {
         const srcBytes = uploadedFiles[0].bytes.slice();
         const pass = (document.getElementById('protectPasswordInput')?.value || '').trim();
@@ -2112,8 +2161,41 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         downloadFile(signedBytes, 'signed.pdf', 'application/pdf');
         showSuccess('Signature baked into PDF successfully!');
-      } else if (['crop', 'crop-pdf', 'forms', 'pdf-forms'].includes(currentTool)) {
-        showStatus(`Processing ready for ${TOOLS[currentTool].title}.`, 'processing');
+      } else if (currentTool === 'crop' || currentTool === 'crop-pdf') {
+        const srcBytes = uploadedFiles[0].bytes.slice();
+        const canvas = document.getElementById('cropPageCanvas');
+        if (!canvas) throw new Error('Crop preview canvas not initialized.');
+
+        const prevW = canvas.clientWidth || canvas.width || 1;
+        const prevH = canvas.clientHeight || canvas.height || 1;
+        const pdfW = cropPageSize.width || 612;
+        const pdfH = cropPageSize.height || 792;
+
+        const scaleX = pdfW / prevW;
+        const scaleY = pdfH / prevH;
+
+        const pdfX = Math.round(cropOverlayPos.left * scaleX);
+        const pdfY = Math.round(pdfH - (cropOverlayPos.top + cropOverlayPos.height) * scaleY);
+        const pdfWidth = Math.round(cropOverlayPos.width * scaleX);
+        const pdfHeight = Math.round(cropOverlayPos.height * scaleY);
+
+        if (pdfWidth <= 0 || pdfHeight <= 0) {
+          throw new Error('Crop width and height must be positive numbers.');
+        }
+
+        const scope = document.querySelector('input[name="cropScope"]:checked')?.value || 'all';
+        let cropBoxes;
+        if (scope === 'current') {
+          cropBoxes = [{ pageIndex: cropCurrentPageIndex, x: pdfX, y: pdfY, width: pdfWidth, height: pdfHeight }];
+        } else {
+          cropBoxes = { x: pdfX, y: pdfY, width: pdfWidth, height: pdfHeight };
+        }
+
+        const croppedBytes = await PDFCore.cropPDF(srcBytes, cropBoxes);
+        downloadFile(croppedBytes, 'cropped.pdf', 'application/pdf');
+        showSuccess('Your PDF has been successfully cropped!');
+      } else if (currentTool === 'forms' || currentTool === 'pdf-forms') {
+        await executeFormAction(false);
       }
     } catch (err) {
       console.error(err);
