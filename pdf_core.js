@@ -33,6 +33,9 @@
     PDFOptionList,
   } = PDFLib;
 
+  const latin1Decoder = new TextDecoder('latin1');
+  const decodePDFRawStream = PDFLib.decodePDFRawStream;
+
   /**
    * Merge multiple PDF files into a single PDF document.
    * @param {Array<Uint8Array|ArrayBuffer>} pdfBytesList 
@@ -371,155 +374,6 @@
   }
 
   /**
-   * Fast pure JS MD5 implementation for standard PDF encryption hash generation.
-   * @param {Uint8Array|string} input 
-   * @returns {string} Hex string (32 lowercase hex characters)
-   */
-  function md5(input) {
-    let bytes;
-    if (typeof input === 'string') {
-      bytes = [];
-      for (let i = 0; i < input.length; i++) {
-        const code = input.charCodeAt(i);
-        if (code < 128) bytes.push(code);
-        else if (code < 2048) {
-          bytes.push((code >> 6) | 192, (code & 63) | 128);
-        } else {
-          bytes.push((code >> 12) | 224, ((code >> 6) & 63) | 128, (code & 63) | 128);
-        }
-      }
-    } else {
-      bytes = Array.from(input);
-    }
-
-    function toWords(b) {
-      const words = [];
-      for (let i = 0; i < b.length; i++) {
-        words[i >> 2] |= (b[i] & 0xff) << ((i % 4) * 8);
-      }
-      return words;
-    }
-    function cmn(q, a, b, x, s, t) {
-      a = (a + q + x + t) | 0;
-      return (((a << s) | (a >>> (32 - s))) + b) | 0;
-    }
-    function ff(a, b, c, d, x, s, t) { return cmn((b & c) | (~b & d), a, b, x, s, t); }
-    function gg(a, b, c, d, x, s, t) { return cmn((b & d) | (c & ~d), a, b, x, s, t); }
-    function hh(a, b, c, d, x, s, t) { return cmn(b ^ c ^ d, a, b, x, s, t); }
-    function ii(a, b, c, d, x, s, t) { return cmn(c ^ (b | ~d), a, b, x, s, t); }
-
-    const n = bytes.length;
-    const x = toWords(bytes);
-    x[n >> 2] |= 0x80 << ((n % 4) * 8);
-    x[(((n + 8) >> 6) << 4) + 14] = n * 8;
-
-    let a = 1732584193, b = -271733879, c = -1732584194, d = 271733878;
-    for (let i = 0; i < x.length; i += 16) {
-      const olda = a, oldb = b, oldc = c, oldd = d;
-      a = ff(a, b, c, d, x[i + 0] || 0, 7, -680876936);
-      d = ff(d, a, b, c, x[i + 1] || 0, 12, -389564586);
-      c = ff(c, d, a, b, x[i + 2] || 0, 17, 606105819);
-      b = ff(b, c, d, a, x[i + 3] || 0, 22, -1044525330);
-      a = ff(a, b, c, d, x[i + 4] || 0, 7, -176418897);
-      d = ff(d, a, b, c, x[i + 5] || 0, 12, 1200080426);
-      c = ff(c, d, a, b, x[i + 6] || 0, 17, -1473231341);
-      b = ff(b, c, d, a, x[i + 7] || 0, 22, -45705983);
-      a = ff(a, b, c, d, x[i + 8] || 0, 7, 1770035416);
-      d = ff(d, a, b, c, x[i + 9] || 0, 12, -1958414417);
-      c = ff(c, d, a, b, x[i + 10] || 0, 17, -42063);
-      b = ff(b, c, d, a, x[i + 11] || 0, 22, -1990404162);
-      a = ff(a, b, c, d, x[i + 12] || 0, 7, 1804603682);
-      d = ff(d, a, b, c, x[i + 13] || 0, 12, -40341101);
-      c = ff(c, d, a, b, x[i + 14] || 0, 17, -1502002290);
-      b = ff(b, c, d, a, x[i + 15] || 0, 22, 1236535329);
-
-      a = gg(a, b, c, d, x[i + 1] || 0, 5, -165796510);
-      d = gg(d, a, b, c, x[i + 6] || 0, 9, -1069501632);
-      c = gg(c, d, a, b, x[i + 11] || 0, 14, 643717713);
-      b = gg(b, c, d, a, x[i + 0] || 0, 20, -373897302);
-      a = gg(a, b, c, d, x[i + 5] || 0, 5, -701558691);
-      d = gg(d, a, b, c, x[i + 10] || 0, 9, 38016083);
-      c = gg(c, d, a, b, x[i + 15] || 0, 14, -660478335);
-      b = gg(b, c, d, a, x[i + 4] || 0, 20, -405537848);
-      a = gg(a, b, c, d, x[i + 9] || 0, 5, 568446438);
-      d = gg(d, a, b, c, x[i + 14] || 0, 9, -1019803690);
-      c = gg(c, d, a, b, x[i + 3] || 0, 14, -187363961);
-      b = gg(b, c, d, a, x[i + 8] || 0, 20, 1163531501);
-      a = gg(a, b, c, d, x[i + 13] || 0, 5, -1444681467);
-      d = gg(d, a, b, c, x[i + 2] || 0, 9, -51403784);
-      c = gg(c, d, a, b, x[i + 7] || 0, 14, 1735328473);
-      b = gg(b, c, d, a, x[i + 12] || 0, 20, -1926607734);
-
-      a = hh(a, b, c, d, x[i + 5] || 0, 4, -378558);
-      d = hh(d, a, b, c, x[i + 8] || 0, 11, -2022574463);
-      c = hh(c, d, a, b, x[i + 11] || 0, 16, 1839030562);
-      b = hh(b, c, d, a, x[i + 14] || 0, 23, -35309556);
-      a = hh(a, b, c, d, x[i + 1] || 0, 4, -1530992060);
-      d = hh(d, a, b, c, x[i + 4] || 0, 11, 1272893353);
-      c = hh(c, d, a, b, x[i + 7] || 0, 16, -155497632);
-      b = hh(b, c, d, a, x[i + 10] || 0, 23, -1094730640);
-      a = hh(a, b, c, d, x[i + 13] || 0, 4, 681279174);
-      d = hh(d, a, b, c, x[i + 0] || 0, 11, -358537222);
-      c = hh(c, d, a, b, x[i + 3] || 0, 16, -722521979);
-      b = hh(b, c, d, a, x[i + 6] || 0, 23, 76029189);
-      a = hh(a, b, c, d, x[i + 9] || 0, 4, -640364487);
-      d = hh(d, a, b, c, x[i + 12] || 0, 11, -421815835);
-      c = hh(c, d, a, b, x[i + 15] || 0, 16, 530742520);
-      b = hh(b, c, d, a, x[i + 2] || 0, 23, -995338651);
-
-      a = ii(a, b, c, d, x[i + 0] || 0, 6, -198630844);
-      d = ii(d, a, b, c, x[i + 7] || 0, 10, 1126891415);
-      c = ii(c, d, a, b, x[i + 14] || 0, 15, -1416354905);
-      b = ii(b, c, d, a, x[i + 5] || 0, 21, -57434055);
-      a = ii(a, b, c, d, x[i + 12] || 0, 6, 1700485571);
-      d = ii(d, a, b, c, x[i + 3] || 0, 10, -1894986606);
-      c = ii(c, d, a, b, x[i + 10] || 0, 15, -1051523);
-      b = ii(b, c, d, a, x[i + 1] || 0, 21, -2054922799);
-      a = ii(a, b, c, d, x[i + 8] || 0, 6, 1873313359);
-      d = ii(d, a, b, c, x[i + 15] || 0, 10, -30611744);
-      c = ii(c, d, a, b, x[i + 6] || 0, 15, -1560198380);
-      b = ii(b, c, d, a, x[i + 13] || 0, 21, 1309151649);
-      a = ii(a, b, c, d, x[i + 4] || 0, 6, -145523070);
-      d = ii(d, a, b, c, x[i + 11] || 0, 10, -1120210379);
-      c = ii(c, d, a, b, x[i + 2] || 0, 15, 718787259);
-      b = ii(b, c, d, a, x[i + 9] || 0, 21, -343485551);
-
-      a = (a + olda) | 0;
-      b = (b + oldb) | 0;
-      c = (c + oldc) | 0;
-      d = (d + oldd) | 0;
-    }
-
-    const out = [a, b, c, d];
-    let hex = '';
-    for (let j = 0; j < 4; j++) {
-      for (let k = 0; k < 4; k++) {
-        const byte = (out[j] >> (k * 8)) & 0xff;
-        hex += byte.toString(16).padStart(2, '0');
-      }
-    }
-    return hex;
-  }
-
-  const PDF_PADDING = [
-    0x28, 0xbf, 0x4e, 0x5e, 0x4e, 0x75, 0x8a, 0x41,
-    0x64, 0x00, 0x4e, 0x56, 0xff, 0xfa, 0x01, 0x08,
-    0x2e, 0x2e, 0x00, 0xb6, 0xab, 0x05, 0x6f, 0xac,
-    0xab, 0xe0, 0x58, 0x61, 0xa2, 0x63, 0x69, 0x75,
-  ];
-
-  function padPassword(pwd) {
-    const bytes = [];
-    for (let i = 0; i < (pwd ? pwd.length : 0); i++) {
-      bytes.push(pwd.charCodeAt(i) & 0xff);
-    }
-    for (let i = 0; bytes.length < 32; i++) {
-      bytes.push(PDF_PADDING[i % PDF_PADDING.length]);
-    }
-    return bytes.slice(0, 32);
-  }
-
-  /**
    * Protect a PDF document with standard password encryption and permissions.
    * @param {Uint8Array|ArrayBuffer} pdfBytes
    * @param {string|Object} userPasswordOrOptions
@@ -560,43 +414,7 @@
       });
     }
 
-    const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
-
-    let p = -64;
-    if (permissions && typeof permissions === 'object') {
-      if (permissions.printing === false) p &= ~4;
-      if (permissions.copying) p |= 16;
-      if (permissions.modifying) p |= 8;
-      if (permissions.annotating) p |= 32;
-    }
-
-    const effectiveOwner = ownerPassword && typeof ownerPassword === 'string' && ownerPassword.trim() !== ''
-      ? ownerPassword
-      : userPassword;
-
-    const userPadded = padPassword(userPassword);
-    const ownerPadded = padPassword(effectiveOwner);
-
-    const oHash1 = md5(ownerPadded);
-    const oHash2 = md5(oHash1 + userPassword);
-    const oHex = (oHash1 + oHash2).slice(0, 64);
-
-    const uHash1 = md5(userPadded);
-    const uHash2 = md5(uHash1 + String(p));
-    const uHex = (uHash1 + uHash2).slice(0, 64);
-
-    const encryptDict = doc.context.obj({
-      Filter: PDFName.of('Standard'),
-      V: 2,
-      R: 3,
-      Length: 128,
-      P: p,
-      O: PDFHexString.of(oHex),
-      U: PDFHexString.of(uHex),
-    });
-
-    doc.context.trailerInfo.Encrypt = encryptDict;
-    return await doc.save();
+    throw new Error('PDF encryption engine (pdf-lib-encrypt) is not available.');
   }
 
   /**
@@ -608,7 +426,7 @@
    * @param {string} [password='']
    * @returns {Promise<Uint8Array>}
    */
-    async function unlockPDF(pdfBytes, password = '') {
+  async function unlockPDF(pdfBytes, password = '') {
     if (!pdfBytes) throw new Error('PDF bytes are required to unlock.');
     const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
 
@@ -617,20 +435,77 @@
       return pdfBytes instanceof Uint8Array ? pdfBytes : new Uint8Array(pdfBytes);
     }
 
-    // Real cryptographic decryption via WebCrypto / pdf-lib-encrypt
-    if (PDFLibEncrypt && typeof PDFLibEncrypt.unlockInPlace === 'function') {
-      try {
-        await PDFLibEncrypt.unlockInPlace(doc, password || '');
-        return await doc.save({ useObjectStreams: false, updateMetadata: false });
-      } catch (err) {
-        if (err.message && err.message.toLowerCase().includes('password')) {
-          throw err;
-        }
-        delete doc.context.trailerInfo.Encrypt;
-        return await doc.save();
+    const encRef = doc.context.trailerInfo.Encrypt;
+    const enc = doc.context.lookup(encRef);
+
+    if (!enc || typeof enc.get !== 'function') {
+      throw new Error('Unsupported cipher algorithm: Invalid or missing /Encrypt dictionary structure.');
+    }
+
+    // Check filter type
+    const filterVal = enc.get(PDFName.of('Filter'));
+    if (filterVal) {
+      const filterName = filterVal.asString ? filterVal.asString() : String(filterVal);
+      if (filterName !== '/Standard' && filterName !== 'Standard') {
+        throw new Error(`Unsupported cipher algorithm: Security handler "${filterName}" is not supported.`);
       }
     }
 
+    // Inspect encryption version V and revision R
+    const vVal = enc.get(PDFName.of('V'));
+    const V = vVal ? (typeof vVal.asNumber === 'function' ? vVal.asNumber() : Number(vVal.value !== undefined ? vVal.value : vVal)) : 0;
+
+    // Detect unsupported V=4 (AES-128 / crypt filters)
+    if (V === 4) {
+      throw new Error('Unsupported cipher algorithm: V=4 encryption is not supported.');
+    }
+
+    // Detect /AESV2 in crypt filter dictionary
+    const cfVal = enc.get(PDFName.of('CF'));
+    if (cfVal) {
+      const cfObj = doc.context.lookup(cfVal);
+      const cfStr = cfObj ? cfObj.toString() : '';
+      if (/AESV2/i.test(cfStr)) {
+        throw new Error('Unsupported cipher algorithm: AES-128 (/AESV2) crypt filter is not supported.');
+      }
+    }
+
+    // Detect unsupported V=5 variants (e.g. V=5 without standard O/U password structures or without CF)
+    if (V === 5 && (!enc.get(PDFName.of('O')) || !enc.get(PDFName.of('U')) || !enc.get(PDFName.of('CF')))) {
+      throw new Error('Unsupported cipher algorithm: V=5 AES-256 without standard password authentication and crypt filter structures.');
+    }
+
+    // Check if cryptographic password derivation structures exist
+    const hasAuthDict = Boolean(
+      enc.get(PDFName.of('O')) ||
+      enc.get(PDFName.of('U')) ||
+      enc.get(PDFName.of('OE')) ||
+      enc.get(PDFName.of('UE')) ||
+      enc.get(PDFName.of('Perms'))
+    );
+
+    if (hasAuthDict) {
+      if (!PDFLibEncrypt || typeof PDFLibEncrypt.unlockInPlace !== 'function') {
+        throw new Error('PDF decryption engine is not available.');
+      }
+      // Attempt in-place cryptographic decryption
+      try {
+        await PDFLibEncrypt.unlockInPlace(doc, password || '');
+      } catch (err) {
+        // Re-throw explicit error: NEVER delete /Encrypt on decryption failure or unsupported cipher
+        const msg = err && err.message ? err.message : String(err);
+        if (/password/i.test(msg)) {
+          throw new Error(`Failed to unlock PDF: ${msg}`);
+        }
+        if (/unsupported|cipher|algorithm|AESV2|AES-128/i.test(msg)) {
+          throw new Error(`Unsupported cipher algorithm: ${msg}`);
+        }
+        throw new Error(`Failed to decrypt PDF with unsupported cipher or invalid password: ${msg}`);
+      }
+      return await doc.save({ useObjectStreams: false, updateMetadata: false });
+    }
+
+    // Pure permissions-only restriction flag without password derivation structures (e.g. mock test PDFs)
     delete doc.context.trailerInfo.Encrypt;
     return await doc.save();
   }
@@ -996,21 +871,25 @@
     let bytes = pdfBytes instanceof Uint8Array ? pdfBytes : new Uint8Array(pdfBytes);
 
     const tailSlice = bytes.slice(Math.max(0, bytes.length - 1500));
-    let tailStr = '';
-    for (let i = 0; i < tailSlice.length; i++) tailStr += String.fromCharCode(tailSlice[i]);
+    const tailStr = latin1Decoder.decode(tailSlice);
 
     const hasValidTrailer = tailStr.includes('trailer') && tailStr.includes('startxref') && tailStr.includes('%%EOF');
     if (!hasValidTrailer || tailStr.lastIndexOf('startxref') < tailStr.lastIndexOf('endobj')) {
-      let fullStr = '';
-      for (let i = 0; i < bytes.length; i++) fullStr += String.fromCharCode(bytes[i]);
+      const fullStr = latin1Decoder.decode(bytes);
 
-      const rootMatch = fullStr.match(/\/Root\s+(\d+)\s+(\d+)\s+R/);
+      // Mask stream bodies with spaces of identical character length so raw binary does not match false positive XRef objects
+      const cleanStr = fullStr.replace(
+        /(stream\r?\n)([\s\S]*?)(\r?\nendstream)/g,
+        (match, p1, p2, p3) => p1 + ' '.repeat(p2.length) + p3
+      );
+
+      const rootMatch = cleanStr.match(/\/Root\s+(\d+)\s+(\d+)\s+R/);
       const objRegex = /(\d+)\s+(\d+)\s+obj/g;
       const xrefEntries = {};
       let match;
       let maxObjNum = 0;
 
-      while ((match = objRegex.exec(fullStr)) !== null) {
+      while ((match = objRegex.exec(cleanStr)) !== null) {
         const objNum = parseInt(match[1], 10);
         const genNum = parseInt(match[2], 10);
         xrefEntries[objNum] = { offset: match.index, genNum };
@@ -1038,9 +917,7 @@
         const startXrefOffset = validBody.length + 1;
         const rebuiltStr = validBody + xref + trailer + startXrefOffset + '\n%%EOF\n';
 
-        const rebuiltBuf = new Uint8Array(rebuiltStr.length);
-        for (let i = 0; i < rebuiltStr.length; i++) rebuiltBuf[i] = rebuiltStr.charCodeAt(i) & 0xff;
-        bytes = rebuiltBuf;
+        bytes = Uint8Array.from(rebuiltStr, c => c.charCodeAt(0));
       }
     }
 
