@@ -47,6 +47,31 @@ All processing happens entirely in client memory using WebAssembly and pure Java
 
 ---
 
+---
+
+## 🛡️ Security & Cryptography Details
+
+PDF Studio handles security directly in-browser using standard Web Crypto and PDF ISO 32000 specifications:
+
+### 1. Password Protection (Real AES-256 In-Browser Encryption)
+- **Standard**: Uses genuine ISO 32000-1 / PDF 2.0 **AES-256** encryption (`/V 5 /R 6 /AESV3`) with Web Crypto key derivation.
+- **Cross-Reader Verification**: Encrypted PDFs are genuinely ciphered at the stream and string level. When opened in **Adobe Acrobat, Google Chrome, Mozilla Firefox, Microsoft Edge, Apple Preview, or mobile PDF readers (iOS/Android)**, the reader strictly demands the password before displaying pages or rendering content.
+- **Configurable Permissions**: Restrict copying, modification, or printing while keeping the file readable.
+
+### 2. Unlocking: Open Password vs. Permissions Locks
+PDF security comes in two distinct modes, and PDF Studio handles each appropriately:
+- **Files with an Open (User) Password**: The file cannot be read without authentication. To unlock, you must provide the password. PDF Studio verifies the password, decrypts all object streams in-memory, and removes the `/Encrypt` dictionary, returning a clean, unencrypted PDF.
+- **Files with Permissions Restrictions Only (Owner Lock, No Open Password)**: Some PDFs open freely in any reader, but restrict printing, copying text, or extracting pages. Because these files have an empty open password, **no password is required to unlock them**—simply click **Unlock Document** to strip the restriction dictionary and restore full copying and printing capabilities.
+
+### 3. Sign PDF: Visual Electronic Stamp vs. Cryptographic Certificate
+> **⚠️ Legal & Technical Transparency Note:**
+>
+> The **Sign PDF** tool in PDF Studio creates an **Electronic Signature Stamp (e-Signature)**—a high-resolution visual signature graphic (drawn on canvas, typed with handwriting fonts, or uploaded as an image) baked directly into the document's page stream.
+>
+> - **What it is**: An electronic mark/overlay permanently rendered onto the PDF canvas.
+> - **What it is NOT**: It is **not** a cryptographic PKI / X.509 digital signature (PAdES / Adobe Approved Trust List). It does not embed a private key digital certificate, mathematical cryptographic digest, or timestamp authority token.
+> - **Legal Validity**: While electronic signature stamps are commonly accepted for informal contracts, internal approvals, receipts, and day-to-day forms, formal government filings, legal deeds, and regulated financial contracts may legally mandate certified cryptographic digital signatures. Always verify the compliance requirements of your jurisdiction and counterparty.
+
 ## Quick Start
 
 ### Option 1: Open Live Web App

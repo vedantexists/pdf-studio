@@ -56,8 +56,10 @@ async function runAdversarialSuite() {
     // Hashes must be different for different passwords
     const doc1 = await PDFDocument.load(p1, { ignoreEncryption: true });
     const doc2 = await PDFDocument.load(p2, { ignoreEncryption: true });
-    const u1 = doc1.context.trailerInfo.Encrypt.get(PDFName.of('U')).value;
-    const u2 = doc2.context.trailerInfo.Encrypt.get(PDFName.of('U')).value;
+    const enc1 = doc1.context.lookup(doc1.context.trailerInfo.Encrypt);
+    const u1 = enc1.get(PDFName.of('U')).value;
+    const enc2 = doc2.context.lookup(doc2.context.trailerInfo.Encrypt);
+    const u2 = enc2.get(PDFName.of('U')).value;
     assert.notStrictEqual(u1, u2, 'Different passwords must yield different U hashes');
     console.log('✓ A1: Password hash entropy & uniqueness passed');
   }

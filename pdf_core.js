@@ -5,11 +5,20 @@
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
     const PDFLib = require('pdf-lib');
-    module.exports = factory(PDFLib);
+    let ple;
+    try {
+      ple = require('./vendor/pdf-lib-encrypt');
+    } catch (e) {
+      try { ple = require('pdf-lib-encrypt'); } catch (e2) {}
+    }
+    module.exports = factory(PDFLib, ple);
   } else {
-    root.PDFCore = factory(root.PDFLib);
+    root.PDFCore = factory(root.PDFLib, root.PDFLibEncrypt);
   }
-})(typeof self !== 'undefined' ? self : this, function (PDFLib) {
+})(typeof self !== 'undefined' ? self : this, function (PDFLib, PDFLibEncrypt) {
+  if (PDFLibEncrypt && typeof PDFLibEncrypt.configure === 'function' && PDFLib) {
+    PDFLibEncrypt.configure(PDFLib);
+  }
   const {
     PDFDocument,
     rgb,
@@ -515,11 +524,13 @@
    * @param {Object} [permissions={}]
    * @returns {Promise<Uint8Array>}
    */
-  async function protectPDF(pdfBytes, userPasswordOrOptions, ownerPassword = null, permissions = {}) {
+    async function protectPDF(pdfBytes, userPasswordOrOptions, ownerPassword = null, permissions = {}) {
     if (!pdfBytes) throw new Error('PDF bytes are required to protect.');
 
     let userPassword = userPasswordOrOptions;
+    let opts = {};
     if (userPasswordOrOptions && typeof userPasswordOrOptions === 'object') {
+      opts = userPasswordOrOptions;
       userPassword = userPasswordOrOptions.userPassword;
       ownerPassword = userPasswordOrOptions.ownerPassword !== undefined ? userPasswordOrOptions.ownerPassword : ownerPassword;
       permissions = userPasswordOrOptions.permissions || permissions;
@@ -529,10 +540,26 @@
       throw new Error('Password cannot be empty.');
     }
 
+    // Real standard AES-256 PDF encryption via WebCrypto / pdf-lib-encrypt
+    if (PDFLibEncrypt && typeof PDFLibEncrypt.lock === 'function') {
+      let pPerm = -4; // default permissions: full access once unlocked
+      if (permissions && typeof permissions === 'object') {
+        let p = -64;
+        if (permissions.printing === false) p &= ~4;
+        if (permissions.copying) p |= 16;
+        if (permissions.modifying) p |= 8;
+        if (permissions.annotating) p |= 32;
+        pPerm = p;
+      }
+      return await PDFLibEncrypt.lock(pdfBytes, userPassword, {
+        permissions: pPerm,
+        algo: opts.algo || 'aes256',
+      });
+    }
+
     const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
 
-    // Compute standard permissions bitmask integer (PDF 1.7 revision 3)
-    let p = -64; // Restrictive default: printing allowed (bit 3), copying/modifying locked
+    let p = -64;
     if (permissions && typeof permissions === 'object') {
       if (permissions.printing === false) p &= ~4;
       if (permissions.copying) p |= 16;
@@ -544,7 +571,6 @@
       ? ownerPassword
       : userPassword;
 
-    // Standard PDF 1.7 Section 7.6.3.3 Algorithm 2/3 key generation
     const userPadded = padPassword(userPassword);
     const ownerPadded = padPassword(effectiveOwner);
 
@@ -579,12 +605,30 @@
    * @param {string} [password='']
    * @returns {Promise<Uint8Array>}
    */
-  async function unlockPDF(pdfBytes, password = '') {
+    async function unlockPDF(pdfBytes, password = '') {
     if (!pdfBytes) throw new Error('PDF bytes are required to unlock.');
     const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
-    if (doc.context && doc.context.trailerInfo && doc.context.trailerInfo.Encrypt) {
-      delete doc.context.trailerInfo.Encrypt;
+
+    // If not encrypted, return clean bytes idempotently
+    if (!doc.context || !doc.context.trailerInfo || !doc.context.trailerInfo.Encrypt) {
+      return pdfBytes instanceof Uint8Array ? pdfBytes : new Uint8Array(pdfBytes);
     }
+
+    // Real cryptographic decryption via WebCrypto / pdf-lib-encrypt
+    if (PDFLibEncrypt && typeof PDFLibEncrypt.unlockInPlace === 'function') {
+      try {
+        await PDFLibEncrypt.unlockInPlace(doc, password || '');
+        return await doc.save({ useObjectStreams: false, updateMetadata: false });
+      } catch (err) {
+        if (err.message && err.message.toLowerCase().includes('password')) {
+          throw err;
+        }
+        delete doc.context.trailerInfo.Encrypt;
+        return await doc.save();
+      }
+    }
+
+    delete doc.context.trailerInfo.Encrypt;
     return await doc.save();
   }
 
@@ -619,12 +663,18 @@
       }
     }
 
+    if (rawBytes instanceof ArrayBuffer) {
+      rawBytes = new Uint8Array(rawBytes);
+    }
+
     if (!rawBytes || rawBytes.length === 0) {
       throw new Error('Signature graphic data cannot be empty.');
     }
 
-    if (rawBytes.byteOffset !== 0 || rawBytes.byteLength !== rawBytes.buffer?.byteLength) {
-      rawBytes = new Uint8Array(rawBytes.slice());
+    if (rawBytes.byteOffset !== 0 || (rawBytes.buffer && rawBytes.byteLength !== rawBytes.buffer.byteLength)) {
+      rawBytes = new Uint8Array(rawBytes.buffer.slice(rawBytes.byteOffset, rawBytes.byteOffset + rawBytes.byteLength));
+    } else if (!(rawBytes instanceof Uint8Array)) {
+      rawBytes = new Uint8Array(rawBytes);
     }
 
     const isPng = (rawBytes[0] === 0x89 && rawBytes[1] === 0x50) || options.imageType === 'png';
@@ -678,13 +728,13 @@
       }
       const width = Number(box.width);
       const height = Number(box.height);
-      if (isNaN(width) || isNaN(height) || width <= 0 || height <= 0) {
-        throw new Error('Invalid crop bounds: width and height must be positive numbers.');
+      if (isNaN(width) || isNaN(height) || width <= 0 || height <= 0 || !Number.isFinite(width) || !Number.isFinite(height)) {
+        throw new Error('Invalid crop bounds: width and height must be positive finite numbers.');
       }
       const x = box.x !== undefined ? Number(box.x) : 0;
       const y = box.y !== undefined ? Number(box.y) : 0;
-      if (isNaN(x) || isNaN(y)) {
-        throw new Error('Invalid crop bounds: coordinates x and y must be numbers.');
+      if (isNaN(x) || isNaN(y) || !Number.isFinite(x) || !Number.isFinite(y)) {
+        throw new Error('Invalid crop bounds: coordinates x and y must be finite numbers.');
       }
 
       if (box.pageIndex !== undefined && box.pageIndex !== null) {
@@ -827,7 +877,7 @@
             const validOptions = field.getOptions();
             if (Array.isArray(val)) {
               const validSubset = val.filter((item) => validOptions.includes(String(item)));
-              if (validSubset.length > 0) validSubset.forEach((item) => field.select(String(item)));
+              if (validSubset.length > 0) field.select(validSubset);
             } else if (validOptions.includes(String(val))) {
               field.select(String(val));
             }
@@ -888,7 +938,7 @@
 
     // Deduplicate and filter valid indices
     const uniqueIndices = Array.from(new Set(pageIndicesToRemove))
-      .filter((idx) => typeof idx === 'number' && !isNaN(idx) && idx >= 0 && idx < totalPages);
+      .filter((idx) => Number.isInteger(idx) && idx >= 0 && idx < totalPages);
 
     if (uniqueIndices.length >= totalPages) {
       throw new Error('Cannot remove all pages: at least one page must remain in the document.');

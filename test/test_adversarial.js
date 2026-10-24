@@ -19,13 +19,14 @@
  *    - multi-page crop isolation & multi-page distinct crops
  *    - crop with out-of-bounds page indices
  *    - crop with empty or invalid crop box objects
+ *    - crop with non-finite coordinates (Infinity)
  * 3. Adversarial Forms:
  *    - inspectForm & fillForm on PDFs without forms
  *    - inspectForm & fillForm on PDFs with malformed AcroForm catalog entry
  *    - fillForm with non-existent field names
  *    - form flattening idempotence (repeated flattening)
  *    - fillForm with empty string, boolean false, special characters (emojis, HTML, newlines)
- *    - multi-choice options: valid selections, invalid choices for dropdown/radio/optionlist
+ *    - multi-choice options: valid selections, custom/invalid choices, multi-select array
  * 4. Adversarial Page Removal:
  *    - removePages with duplicate indices
  *    - removePages with unsorted indices
@@ -35,7 +36,7 @@
  *    - removePages with empty array or null
  * 5. Adversarial Stress & Resiliency:
  *    - corrupted PDF bytes rejection across all Phase 1 APIs
- *    - 100-page document stress test
+ *    - 100-page document batch stress test
  */
 
 const assert = require('assert');
@@ -95,6 +96,19 @@ async function createMalformedFormPDF() {
   return await doc.save();
 }
 
+async function createRestrictedPDF() {
+  const doc = await PDFDocument.create();
+  doc.addPage([400, 600]);
+  const encryptDict = doc.context.obj({
+    Filter: PDFName.of('Standard'),
+    V: 2,
+    R: 3,
+    P: -64,
+  });
+  doc.context.trailerInfo.Encrypt = encryptDict;
+  return await doc.save();
+}
+
 const stats = {
   total: 0,
   passed: 0,
@@ -112,7 +126,7 @@ async function test(name, fn) {
     stats.failed++;
     stats.failures.push({ name, error: err });
     console.error(`  ✗ ${name}`);
-    console.error(`    Error: ${err.message}\n    Stack: ${err.stack}`);
+    console.error(`    Error: ${err.message}`);
   }
 }
 
@@ -145,25 +159,24 @@ async function runAdversarialSuite() {
     assert.strictEqual(doc.getPageCount(), 2);
   });
 
-  await test('Adv-SEC.3: unlockPDF with various password inputs (empty string, wrong password, special chars)', async () => {
+  await test('Adv-SEC.3: unlockPDF on encrypted vs permissions-restricted documents', async () => {
     const original = await createSamplePDF(1, 'Unlock Passwords');
     const protectedBytes = await PDFCore.protectPDF(original, 'CorrectPass');
     
-    // Empty password
-    const un1 = await PDFCore.unlockPDF(protectedBytes, '');
-    assert.strictEqual((await PDFDocument.load(un1)).isEncrypted, false);
+    // Correct password unlocks cleanly
+    const unCorrect = await PDFCore.unlockPDF(protectedBytes, 'CorrectPass');
+    assert.strictEqual((await PDFDocument.load(unCorrect)).isEncrypted, false);
 
-    // Wrong password
-    const un2 = await PDFCore.unlockPDF(protectedBytes, 'WrongPass123');
-    assert.strictEqual((await PDFDocument.load(un2)).isEncrypted, false);
+    // Wrong password must be rejected
+    await assert.rejects(
+      async () => await PDFCore.unlockPDF(protectedBytes, 'WrongPass123'),
+      /password|wrong/i
+    );
 
-    // Whitespace password
-    const un3 = await PDFCore.unlockPDF(protectedBytes, '   ');
-    assert.strictEqual((await PDFDocument.load(un3)).isEncrypted, false);
-
-    // Special characters password
-    const un4 = await PDFCore.unlockPDF(protectedBytes, '!@#$%^&*()_+~`|}{[]\\:;?><,./');
-    assert.strictEqual((await PDFDocument.load(un4)).isEncrypted, false);
+    // Permissions-restricted document (no open password) unlocks freely without password
+    const permsDoc = await createRestrictedPDF();
+    const unPerms = await PDFCore.unlockPDF(permsDoc, '');
+    assert.strictEqual((await PDFDocument.load(unPerms)).isEncrypted, false);
   });
 
   await test('Adv-SEC.4: protectPDF rejects empty, whitespace, null, undefined, and non-string passwords', async () => {
@@ -439,6 +452,20 @@ async function runAdversarialSuite() {
     await assert.rejects(async () => PDFCore.cropPDF(sample, undefined), /crop box/i);
   });
 
+  await test('Adv-CROP.16: cropPDF rejects non-finite coordinates (Infinity) preventing PDF syntax corruption', async () => {
+    const sample = await createSamplePDF(1);
+    await assert.rejects(
+      async () => {
+        const res = await PDFCore.cropPDF(sample, [{ pageIndex: 0, x: 0, y: 0, width: Infinity, height: 100 }]);
+        // If it didn't throw, check if PDFDocument.load can parse it
+        const loaded = await PDFDocument.load(res);
+        loaded.getPage(0).getCropBox();
+      },
+      /finite|positive|number|bounds|invalid/i,
+      'cropPDF must reject Infinity dimensions or produce parseable PDF'
+    );
+  });
+
   // ==========================================================================
   // Section 3: Adversarial Forms Tests
   // ==========================================================================
@@ -532,13 +559,13 @@ async function runAdversarialSuite() {
     assert.strictEqual(f2.find(f => f.name === 'agreeTerms').value, false);
   });
 
-  await test('Adv-FORM.11: fillForm with invalid dropdown option not in list handles safely', async () => {
+  await test('Adv-FORM.11: fillForm with invalid dropdown option not in list is ignored safely', async () => {
     const formBytes = await createFormPDF();
     // Dropdown has options ['Admin', 'Editor', 'Viewer']
     const filled = await PDFCore.fillForm(formBytes, { role: 'Astronaut' }, false);
     const fields = await PDFCore.inspectForm(filled);
     const roleField = fields.find(f => f.name === 'role');
-    // Value remains previous or unchanged, didn't throw
+    // PDFCombobox options are validated against validOptions; invalid option ignored
     assert.strictEqual(roleField.value, 'Admin');
   });
 
@@ -551,13 +578,14 @@ async function runAdversarialSuite() {
     assert.strictEqual(notifyField.value, 'daily');
   });
 
-  await test('Adv-FORM.13: fillForm with OptionList multiple selections', async () => {
+  await test('Adv-FORM.13: fillForm with OptionList multiple selections retains all selected choices', async () => {
     const formBytes = await createFormPDF();
     // OptionList options: ['Tech', 'Design', 'Marketing']
+    // Calling fillForm with array of choices: ['Tech', 'Design']
     const filled = await PDFCore.fillForm(formBytes, { tags: ['Tech', 'Design'] }, false);
     const doc = await PDFDocument.load(filled);
     const sel = doc.getForm().getOptionList('tags').getSelected();
-    assert.deepStrictEqual(sel, ['Tech', 'Design']);
+    assert.deepStrictEqual(sel, ['Tech', 'Design'], 'Must preserve all selections in array, not just the last one');
   });
 
   await test('Adv-FORM.14: fillForm with OptionList invalid option handles safely', async () => {
@@ -566,6 +594,14 @@ async function runAdversarialSuite() {
     const doc = await PDFDocument.load(filled);
     // Didn't throw, original selection preserved
     assert(doc.getForm().getOptionList('tags').getSelected().length > 0);
+  });
+
+  await test('Adv-FORM.15: fillForm with Dropdown multiple selections retains all selected options', async () => {
+    const formBytes = await createFormPDF();
+    const filled = await PDFCore.fillForm(formBytes, { role: ['Admin', 'Editor'] }, false);
+    const doc = await PDFDocument.load(filled);
+    const sel = doc.getForm().getDropdown('role').getSelected();
+    assert.deepStrictEqual(sel, ['Admin', 'Editor'], 'Dropdown multi-selection must retain all selected options in array');
   });
 
   // ==========================================================================

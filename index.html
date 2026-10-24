@@ -513,6 +513,9 @@
         <button type="button" class="modal-close-btn" data-close-modal aria-label="Close modal">✕</button>
       </div>
       <div class="modal-body" id="signModalBody">
+                <div class="sig-disclaimer" style="font-size: 0.8rem; color: var(--text-muted); background: var(--bg-surface); padding: 0.5rem 0.75rem; border-radius: 6px; margin-bottom: 0.75rem; border: 1px solid var(--border-color);">
+          ℹ️ <strong>Electronic Signature Stamp</strong>: Adds a visual signature image to your PDF. This is not a cryptographic digital certificate (PKI/PAdES).
+        </div>
         <div class="modal-tabs" role="tablist">
           <button type="button" class="tab-btn active" id="tabDrawBtn" data-tab="draw">Draw</button>
           <button type="button" class="tab-btn" id="tabTypeBtn" data-tab="type">Type</button>
@@ -581,7 +584,7 @@
       </div>
       <div class="modal-body" id="unlockModalBody">
         <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1rem;">
-          Enter the password to unlock this PDF. If the document is restricted only by permissions or owner locks, leave blank and click Unlock.
+          <strong>Password-Protected</strong>: Enter the password to decrypt.<br><strong>Permissions-Restricted Only</strong>: If the file opens freely but restricts printing or copying, leave blank and click Unlock to strip all restrictions.
         </p>
         <div class="setting-group">
           <label for="modalUnlockPasswordInput">Password</label>
@@ -600,7 +603,7 @@
       </div>
       <div class="modal-body" id="protectModalBody">
         <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1rem;">
-          Set a secure user password to encrypt this PDF document. The password will be required whenever anyone opens the file.
+          Encrypts this document using standard AES-256 encryption. The password will be required when opening the PDF in Adobe Acrobat, Chrome, Apple Preview, or mobile viewers.
         </p>
         <div class="setting-group">
           <label for="modalProtectPasswordInput">Password *</label>
@@ -638,6 +641,7 @@
     </div>
   </div>
 
+  <script src="vendor/pdf-lib-encrypt.js"></script>
   <script src="pdf_core.js"></script>
   <script src="app.js"></script>
 </body>
