@@ -240,6 +240,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  function removeSignPreview() {
+    const existing = document.getElementById('signPreviewContainer');
+    if (existing) existing.remove();
+  }
+
   // --- Navigation & Routing ---
   function showDashboard() {
     currentTool = null;
@@ -247,6 +252,9 @@ document.addEventListener('DOMContentLoaded', () => {
     activePages = [];
     pdfFileInput.value = '';
     imgFileInput.value = '';
+    currentSignatureDataUrl = null;
+    signCurrentPageIndex = 0;
+    removeSignPreview();
     hideStatus();
     dropdownToggles.forEach(t => t.classList.remove('active'));
 
@@ -266,6 +274,9 @@ document.addEventListener('DOMContentLoaded', () => {
     activePages = [];
     pdfFileInput.value = '';
     imgFileInput.value = '';
+    currentSignatureDataUrl = null;
+    signCurrentPageIndex = 0;
+    removeSignPreview();
     hideStatus();
 
     const meta = TOOLS[toolKey];
@@ -526,13 +537,236 @@ document.addEventListener('DOMContentLoaded', () => {
       // Show file list with reorder buttons
       pagesGrid.style.display = 'none';
       filesList.style.display = 'flex';
+      removeSignPreview();
       renderFileList();
+    } else if (currentTool === 'sign' || currentTool === 'sign-pdf') {
+      filesList.style.display = 'none';
+      pagesGrid.style.display = 'none';
+      await renderSignPreview();
     } else {
       // Single PDF visual pages grid
+      removeSignPreview();
       filesList.style.display = 'none';
       pagesGrid.style.display = 'grid';
       await renderPageThumbnails();
     }
+  }
+
+  async function renderSignPreview() {
+    pagesGrid.style.display = 'none';
+    filesList.style.display = 'none';
+
+    let container = document.getElementById('signPreviewContainer');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'signPreviewContainer';
+      container.className = 'sign-preview-container';
+      document.getElementById('itemsContainer').appendChild(container);
+    }
+
+    const file = uploadedFiles[0];
+    const totalPages = file ? file.pageCount || 1 : 1;
+    if (signCurrentPageIndex >= totalPages) signCurrentPageIndex = 0;
+
+    container.innerHTML = `
+      <div class="sign-page-nav">
+        <button type="button" class="secondary-btn" id="sigPrevPageBtn" ${signCurrentPageIndex === 0 ? 'disabled style="opacity:0.4;"' : ''}>← Prev Page</button>
+        <span id="sigPageIndicator">Page ${signCurrentPageIndex + 1} of ${totalPages}</span>
+        <button type="button" class="secondary-btn" id="sigNextPageBtn" ${signCurrentPageIndex >= totalPages - 1 ? 'disabled style="opacity:0.4;"' : ''}>Next Page →</button>
+      </div>
+      <div id="signPageWrapper" class="sign-page-wrapper">
+        <canvas id="signPageCanvas"></canvas>
+        <div id="signatureOverlay" class="signature-overlay" style="display: ${currentSignatureDataUrl ? 'flex' : 'none'}; left: ${sigOverlayPos.left}px; top: ${sigOverlayPos.top}px; width: ${sigOverlayPos.width}px; height: ${sigOverlayPos.height}px;">
+          <img id="sigOverlayImg" src="${currentSignatureDataUrl || ''}" alt="Signature">
+          <div class="resize-handle" id="sigResizeHandle"></div>
+          <div class="sig-delete-btn" id="sigDeleteBtn" title="Remove signature">✕</div>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('sigPrevPageBtn').addEventListener('click', async () => {
+      if (signCurrentPageIndex > 0) {
+        signCurrentPageIndex--;
+        await renderSignPreview();
+        renderSettingsPanel();
+      }
+    });
+
+    document.getElementById('sigNextPageBtn').addEventListener('click', async () => {
+      if (signCurrentPageIndex < totalPages - 1) {
+        signCurrentPageIndex++;
+        await renderSignPreview();
+        renderSettingsPanel();
+      }
+    });
+
+    document.getElementById('sigDeleteBtn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      currentSignatureDataUrl = null;
+      const overlay = document.getElementById('signatureOverlay');
+      if (overlay) overlay.style.display = 'none';
+      renderSettingsPanel();
+    });
+
+    setupSignatureOverlayInteractions();
+    await renderSignPageCanvas(file, signCurrentPageIndex + 1);
+    updateSigCoordinateDisplay();
+  }
+
+  async function renderSignPageCanvas(file, pageNum) {
+    const canvas = document.getElementById('signPageCanvas');
+    if (!canvas || !file || !file.bytes) return;
+
+    if (window.pdfjsLib) {
+      try {
+        if (!window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
+          window.pdfjsLib.GlobalWorkerOptions.workerSrc = window.location.protocol.startsWith('http')
+            ? 'node_modules/pdfjs-dist/build/pdf.worker.min.js'
+            : 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        }
+        const clonedBytes = file.bytes.slice();
+        const pdf = await window.pdfjsLib.getDocument({ data: clonedBytes }).promise;
+        const page = await pdf.getPage(pageNum);
+        const originalViewport = page.getViewport({ scale: 1.0 });
+        currentPdfPageSize = { width: originalViewport.width, height: originalViewport.height };
+
+        const targetWidth = Math.min(560, window.innerWidth - 80);
+        const scale = targetWidth / originalViewport.width;
+        const viewport = page.getViewport({ scale });
+
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const ctx = canvas.getContext('2d');
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        return;
+      } catch (err) {
+        console.warn('PDF.js render in sign preview failed, using canvas placeholder:', err);
+      }
+    }
+
+    // Fallback
+    canvas.width = 500;
+    canvas.height = 700;
+    currentPdfPageSize = { width: 500, height: 700 };
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.strokeRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#1e293b';
+    ctx.font = 'bold 24px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`Page ${pageNum}`, 250, 350);
+  }
+
+  function setupSignatureOverlayInteractions() {
+    const overlay = document.getElementById('signatureOverlay');
+    const resizeHandle = document.getElementById('sigResizeHandle');
+    const canvas = document.getElementById('signPageCanvas');
+    if (!overlay || !resizeHandle || !canvas) return;
+
+    overlay.onpointerdown = (e) => {
+      if (e.target.id === 'sigResizeHandle' || e.target.id === 'sigDeleteBtn') return;
+      e.preventDefault();
+      isDraggingSig = true;
+      sigDragStart = {
+        x: e.clientX,
+        y: e.clientY,
+        left: sigOverlayPos.left,
+        top: sigOverlayPos.top,
+      };
+      overlay.setPointerCapture(e.pointerId);
+    };
+
+    overlay.onpointermove = (e) => {
+      if (!isDraggingSig) return;
+      e.preventDefault();
+      const dx = e.clientX - sigDragStart.x;
+      const dy = e.clientY - sigDragStart.y;
+      const maxLeft = Math.max(0, canvas.clientWidth - sigOverlayPos.width);
+      const maxTop = Math.max(0, canvas.clientHeight - sigOverlayPos.height);
+
+      sigOverlayPos.left = Math.max(0, Math.min(maxLeft, sigDragStart.left + dx));
+      sigOverlayPos.top = Math.max(0, Math.min(maxTop, sigDragStart.top + dy));
+
+      overlay.style.left = `${sigOverlayPos.left}px`;
+      overlay.style.top = `${sigOverlayPos.top}px`;
+      updateSigCoordinateDisplay();
+    };
+
+    const stopDragging = (e) => {
+      if (isDraggingSig) {
+        isDraggingSig = false;
+        try { overlay.releasePointerCapture(e.pointerId); } catch {}
+      }
+    };
+    overlay.onpointerup = stopDragging;
+    overlay.onpointercancel = stopDragging;
+
+    resizeHandle.onpointerdown = (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      isResizingSig = true;
+      sigDragStart = {
+        x: e.clientX,
+        y: e.clientY,
+        width: sigOverlayPos.width,
+        height: sigOverlayPos.height,
+      };
+      resizeHandle.setPointerCapture(e.pointerId);
+    };
+
+    resizeHandle.onpointermove = (e) => {
+      if (!isResizingSig) return;
+      e.preventDefault();
+      const dx = e.clientX - sigDragStart.x;
+      const dy = e.clientY - sigDragStart.y;
+
+      const maxWidth = canvas.clientWidth - sigOverlayPos.left;
+      const maxHeight = canvas.clientHeight - sigOverlayPos.top;
+
+      sigOverlayPos.width = Math.max(40, Math.min(maxWidth, sigDragStart.width + dx));
+      sigOverlayPos.height = Math.max(20, Math.min(maxHeight, sigDragStart.height + dy));
+
+      overlay.style.width = `${sigOverlayPos.width}px`;
+      overlay.style.height = `${sigOverlayPos.height}px`;
+      updateSigCoordinateDisplay();
+    };
+
+    const stopResizing = (e) => {
+      if (isResizingSig) {
+        isResizingSig = false;
+        try { resizeHandle.releasePointerCapture(e.pointerId); } catch {}
+      }
+    };
+    resizeHandle.onpointerup = stopResizing;
+    resizeHandle.onpointercancel = stopResizing;
+  }
+
+  function updateSigCoordinateDisplay() {
+    const canvas = document.getElementById('signPageCanvas');
+    if (!canvas) return;
+    const prevW = canvas.clientWidth || canvas.width || 1;
+    const prevH = canvas.clientHeight || canvas.height || 1;
+    const pdfW = currentPdfPageSize.width || 612;
+    const pdfH = currentPdfPageSize.height || 792;
+
+    const scaleX = pdfW / prevW;
+    const scaleY = pdfH / prevH;
+
+    const pdfX = Math.round(sigOverlayPos.left * scaleX);
+    const pdfY = Math.round(pdfH - (sigOverlayPos.top + sigOverlayPos.height) * scaleY);
+    const pdfWpt = Math.round(sigOverlayPos.width * scaleX);
+    const pdfHpt = Math.round(sigOverlayPos.height * scaleY);
+
+    const ptX = document.getElementById('sigPtX');
+    const ptY = document.getElementById('sigPtY');
+    const ptW = document.getElementById('sigPtW');
+    const ptH = document.getElementById('sigPtH');
+    if (ptX) ptX.textContent = pdfX;
+    if (ptY) ptY.textContent = pdfY;
+    if (ptW) ptW.textContent = pdfWpt;
+    if (ptH) ptH.textContent = pdfHpt;
   }
 
   function renderFileList() {
@@ -974,25 +1208,79 @@ document.addEventListener('DOMContentLoaded', () => {
       toolSettings.innerHTML = `
         <div class="setting-group">
           <label for="unlockPasswordInput">Document Password</label>
-          <input type="password" id="unlockPasswordInput" placeholder="Optional for restricted permissions">
-          <p class="setting-hint">Leave blank if the document only has permission locks.</p>
+          <input type="password" id="unlockPasswordInput" placeholder="Password (leave empty if restricted only)">
+          <p class="setting-hint">If your document is restricted by owner permissions, leave blank and click Unlock. If it requires a password to open, enter it above.</p>
         </div>
       `;
     } else if (currentTool === 'protect' || currentTool === 'protect-pdf') {
       toolSettings.innerHTML = `
         <div class="setting-group">
-          <label for="protectPasswordInput">Set Password</label>
+          <label for="protectPasswordInput">Set Password *</label>
           <input type="password" id="protectPasswordInput" placeholder="Enter password to protect PDF">
-          <p class="setting-hint">This password will be required to open the document.</p>
+          <span class="setting-hint">Password cannot be empty.</span>
+        </div>
+        <div class="setting-group" style="margin-top: 0.75rem;">
+          <label for="protectConfirmInput">Confirm Password *</label>
+          <input type="password" id="protectConfirmInput" placeholder="Re-enter password">
+        </div>
+        <div class="setting-group" style="margin-top: 0.75rem;">
+          <label>Permissions Constraints</label>
+          <label class="radio-option">
+            <input type="checkbox" id="protectPermPrinting" checked>
+            <span>Allow Printing (High Quality)</span>
+          </label>
+          <label class="radio-option">
+            <input type="checkbox" id="protectPermCopying">
+            <span>Allow Copying Content & Graphics</span>
+          </label>
+          <label class="radio-option">
+            <input type="checkbox" id="protectPermModifying">
+            <span>Allow Modifying Contents</span>
+          </label>
+          <label class="radio-option">
+            <input type="checkbox" id="protectPermAnnotating">
+            <span>Allow Annotations & Form Filling</span>
+          </label>
         </div>
       `;
     } else if (currentTool === 'sign' || currentTool === 'sign-pdf') {
+      const pageOptions = Array.from({ length: totalPages }, (_, i) => `<option value="${i}" ${i === signCurrentPageIndex ? 'selected' : ''}>Page ${i + 1}</option>`).join('');
       toolSettings.innerHTML = `
         <div class="setting-group">
-          <label>Signature Options</label>
-          <p class="setting-hint">Create, type, or upload your signature to place on pages.</p>
+          <label>Signature Graphic</label>
+          <button type="button" class="primary-btn" id="openSignModalBtn" style="width: 100%; justify-content: center; margin-bottom: 0.5rem;">
+            <span>✍️ ${currentSignatureDataUrl ? 'Change Signature' : 'Create Signature'}</span>
+          </button>
+          <span class="setting-hint">${currentSignatureDataUrl ? 'Signature ready. Drag to reposition or drag handle to resize.' : 'Click above to draw, type, or upload a signature.'}</span>
+        </div>
+        <div class="setting-group" style="margin-top: 0.75rem;">
+          <label for="signPageSelect">Target Page</label>
+          <select id="signPageSelect">
+            ${pageOptions}
+          </select>
+        </div>
+        <div class="setting-group" style="margin-top: 0.75rem;">
+          <label>PDF Placement Points</label>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; font-size: 0.85rem; background: #f8fafc; padding: 0.6rem; border-radius: var(--radius-sm); border: 1px solid var(--border);">
+            <div>X: <strong id="sigPtX">0</strong> pt</div>
+            <div>Y: <strong id="sigPtY">0</strong> pt</div>
+            <div>W: <strong id="sigPtW">0</strong> pt</div>
+            <div>H: <strong id="sigPtH">0</strong> pt</div>
+          </div>
         </div>
       `;
+
+      document.getElementById('openSignModalBtn')?.addEventListener('click', () => {
+        openModal('signModal');
+      });
+
+      document.getElementById('signPageSelect')?.addEventListener('change', async (e) => {
+        signCurrentPageIndex = parseInt(e.target.value, 10) || 0;
+        await renderSignPreview();
+        renderSettingsPanel();
+      });
+
+      updateSigCoordinateDisplay();
     }
   }
 
@@ -1212,21 +1500,62 @@ document.addEventListener('DOMContentLoaded', () => {
           downloadFile(resultBytes, 'removed_pages.pdf', 'application/pdf');
           showSuccess('Pages removed successfully!');
         }
-      } else if (['sign', 'sign-pdf', 'unlock', 'unlock-pdf', 'protect', 'protect-pdf', 'crop', 'crop-pdf', 'forms', 'pdf-forms'].includes(currentTool)) {
+      } else if (currentTool === 'protect' || currentTool === 'protect-pdf') {
         const srcBytes = uploadedFiles[0].bytes.slice();
-        if (currentTool.startsWith('unlock') && PDFCore.unlockPDF) {
-          const pass = document.getElementById('unlockPasswordInput')?.value || '';
-          const res = await PDFCore.unlockPDF(srcBytes, pass);
-          downloadFile(res, 'unlocked.pdf', 'application/pdf');
-          showSuccess('PDF unlocked successfully!');
-        } else if (currentTool.startsWith('protect') && PDFCore.protectPDF) {
-          const pass = document.getElementById('protectPasswordInput')?.value || '';
-          const res = await PDFCore.protectPDF(srcBytes, { userPassword: pass });
-          downloadFile(res, 'protected.pdf', 'application/pdf');
-          showSuccess('PDF protected successfully!');
-        } else {
-          showStatus(`Processing ready for ${TOOLS[currentTool].title}.`, 'processing');
+        const pass = (document.getElementById('protectPasswordInput')?.value || '').trim();
+        const confirmPass = (document.getElementById('protectConfirmInput')?.value || '').trim();
+        if (!pass) {
+          throw new Error('Password cannot be empty.');
         }
+        if (pass !== confirmPass) {
+          throw new Error('Passwords do not match. Please verify your confirmation password.');
+        }
+        const permissions = {
+          printing: document.getElementById('protectPermPrinting')?.checked ?? true,
+          copying: document.getElementById('protectPermCopying')?.checked ?? false,
+          modifying: document.getElementById('protectPermModifying')?.checked ?? false,
+          annotating: document.getElementById('protectPermAnnotating')?.checked ?? false,
+        };
+        const protectedBytes = await PDFCore.protectPDF(srcBytes, pass, null, permissions);
+        downloadFile(protectedBytes, 'protected.pdf', 'application/pdf');
+        showSuccess('Your PDF has been encrypted with password protection!');
+      } else if (currentTool === 'unlock' || currentTool === 'unlock-pdf') {
+        const srcBytes = uploadedFiles[0].bytes.slice();
+        const pass = (document.getElementById('unlockPasswordInput')?.value || '').trim();
+        const unlockedBytes = await PDFCore.unlockPDF(srcBytes, pass);
+        downloadFile(unlockedBytes, 'unlocked.pdf', 'application/pdf');
+        showSuccess('Your PDF has been unlocked and decrypted successfully!');
+      } else if (currentTool === 'sign' || currentTool === 'sign-pdf') {
+        const srcBytes = uploadedFiles[0].bytes.slice();
+        if (!currentSignatureDataUrl) {
+          throw new Error('Please create or upload a signature first using "Create Signature".');
+        }
+        const canvas = document.getElementById('signPageCanvas');
+        if (!canvas) throw new Error('Signature preview canvas not ready.');
+
+        const prevW = canvas.clientWidth || canvas.width || 1;
+        const prevH = canvas.clientHeight || canvas.height || 1;
+        const pdfW = currentPdfPageSize.width || 612;
+        const pdfH = currentPdfPageSize.height || 792;
+
+        const scaleX = pdfW / prevW;
+        const scaleY = pdfH / prevH;
+
+        const pdfX = Math.round(sigOverlayPos.left * scaleX);
+        const pdfY = Math.round(pdfH - (sigOverlayPos.top + sigOverlayPos.height) * scaleY);
+        const pdfWidth = Math.round(sigOverlayPos.width * scaleX);
+        const pdfHeight = Math.round(sigOverlayPos.height * scaleY);
+
+        const signedBytes = await PDFCore.signPDF(srcBytes, currentSignatureDataUrl, signCurrentPageIndex, {
+          x: pdfX,
+          y: pdfY,
+          width: pdfWidth,
+          height: pdfHeight,
+        });
+        downloadFile(signedBytes, 'signed.pdf', 'application/pdf');
+        showSuccess('Signature baked into PDF successfully!');
+      } else if (['crop', 'crop-pdf', 'forms', 'pdf-forms'].includes(currentTool)) {
+        showStatus(`Processing ready for ${TOOLS[currentTool].title}.`, 'processing');
       }
     } catch (err) {
       console.error(err);
@@ -1285,4 +1614,267 @@ document.addEventListener('DOMContentLoaded', () => {
       URL.revokeObjectURL(url);
     }, 1000);
   }
+
+  // --- Modal Management & Signature Setup ---
+  function openModal(modalId) {
+    const modalContainer = document.getElementById('modalContainer');
+    if (!modalContainer) return;
+    modalContainer.style.display = 'flex';
+    modalContainer.setAttribute('aria-hidden', 'false');
+    const allModals = modalContainer.querySelectorAll('.modal-dialog');
+    allModals.forEach((m) => { m.style.display = 'none'; });
+    const target = document.getElementById(modalId);
+    if (target) target.style.display = 'flex';
+  }
+  window.openModal = openModal;
+
+  function closeModal() {
+    const modalContainer = document.getElementById('modalContainer');
+    if (!modalContainer) return;
+    modalContainer.style.display = 'none';
+    modalContainer.setAttribute('aria-hidden', 'true');
+    const allModals = modalContainer.querySelectorAll('.modal-dialog');
+    allModals.forEach((m) => { m.style.display = 'none'; });
+  }
+  window.closeModal = closeModal;
+
+  function initSignatureModal() {
+    const tabDrawBtn = document.getElementById('tabDrawBtn');
+    const tabTypeBtn = document.getElementById('tabTypeBtn');
+    const tabUploadBtn = document.getElementById('tabUploadBtn');
+
+    const drawTabPanel = document.getElementById('drawTabPanel');
+    const typeTabPanel = document.getElementById('typeTabPanel');
+    const uploadTabPanel = document.getElementById('uploadTabPanel');
+
+    function switchSignTab(tab) {
+      activeSignTab = tab;
+      [tabDrawBtn, tabTypeBtn, tabUploadBtn].forEach((b) => b?.classList.remove('active'));
+      if (tab === 'draw') {
+        tabDrawBtn?.classList.add('active');
+        if (drawTabPanel) drawTabPanel.style.display = 'flex';
+        if (typeTabPanel) typeTabPanel.style.display = 'none';
+        if (uploadTabPanel) uploadTabPanel.style.display = 'none';
+      } else if (tab === 'type') {
+        tabTypeBtn?.classList.add('active');
+        if (drawTabPanel) drawTabPanel.style.display = 'none';
+        if (typeTabPanel) typeTabPanel.style.display = 'flex';
+        if (uploadTabPanel) uploadTabPanel.style.display = 'none';
+        updateTypeSignatureCanvas();
+      } else if (tab === 'upload') {
+        tabUploadBtn?.classList.add('active');
+        if (drawTabPanel) drawTabPanel.style.display = 'none';
+        if (typeTabPanel) typeTabPanel.style.display = 'none';
+        if (uploadTabPanel) uploadTabPanel.style.display = 'flex';
+      }
+    }
+
+    tabDrawBtn?.addEventListener('click', () => switchSignTab('draw'));
+    tabTypeBtn?.addEventListener('click', () => switchSignTab('type'));
+    tabUploadBtn?.addEventListener('click', () => switchSignTab('upload'));
+
+    // Draw Tab Canvas
+    const drawCanvas = document.getElementById('sigDrawCanvas');
+    if (drawCanvas) {
+      const dctx = drawCanvas.getContext('2d');
+      dctx.lineCap = 'round';
+      dctx.lineJoin = 'round';
+      let isDrawing = false;
+      let lastX = 0;
+      let lastY = 0;
+
+      function getCanvasPos(e) {
+        const rect = drawCanvas.getBoundingClientRect();
+        const scaleX = drawCanvas.width / rect.width;
+        const scaleY = drawCanvas.height / rect.height;
+        return {
+          x: (e.clientX - rect.left) * scaleX,
+          y: (e.clientY - rect.top) * scaleY,
+        };
+      }
+
+      drawCanvas.addEventListener('pointerdown', (e) => {
+        isDrawing = true;
+        const pos = getCanvasPos(e);
+        lastX = pos.x;
+        lastY = pos.y;
+        dctx.beginPath();
+        dctx.strokeStyle = sigColor;
+        dctx.lineWidth = sigStrokeWidth;
+        dctx.moveTo(lastX, lastY);
+        drawCanvas.setPointerCapture(e.pointerId);
+      });
+
+      drawCanvas.addEventListener('pointermove', (e) => {
+        if (!isDrawing) return;
+        const pos = getCanvasPos(e);
+        dctx.lineTo(pos.x, pos.y);
+        dctx.stroke();
+        lastX = pos.x;
+        lastY = pos.y;
+        hasDrawn = true;
+      });
+
+      const stopDrawing = (e) => {
+        if (isDrawing) {
+          isDrawing = false;
+          try { drawCanvas.releasePointerCapture(e.pointerId); } catch {}
+        }
+      };
+      drawCanvas.addEventListener('pointerup', stopDrawing);
+      drawCanvas.addEventListener('pointerleave', stopDrawing);
+
+      // Color palette for draw tab
+      document.querySelectorAll('.color-dot').forEach((dot) => {
+        dot.addEventListener('click', () => {
+          document.querySelectorAll('.color-dot').forEach((d) => d.classList.remove('active'));
+          dot.classList.add('active');
+          sigColor = dot.dataset.color || '#000000';
+        });
+      });
+
+      // Stroke width
+      document.getElementById('sigStrokeWidth')?.addEventListener('input', (e) => {
+        sigStrokeWidth = parseInt(e.target.value, 10) || 2;
+      });
+
+      // Clear button
+      document.getElementById('sigClearCanvasBtn')?.addEventListener('click', () => {
+        dctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+        hasDrawn = false;
+      });
+    }
+
+    // Type Tab
+    const sigTextInput = document.getElementById('sigTextInput');
+    const sigFontSelect = document.getElementById('sigFontSelect');
+    sigTextInput?.addEventListener('input', updateTypeSignatureCanvas);
+    sigFontSelect?.addEventListener('change', (e) => {
+      sigFont = e.target.value;
+      updateTypeSignatureCanvas();
+    });
+
+    document.querySelectorAll('.color-dot-type').forEach((dot) => {
+      dot.addEventListener('click', () => {
+        document.querySelectorAll('.color-dot-type').forEach((d) => d.classList.remove('active'));
+        dot.classList.add('active');
+        sigColor = dot.dataset.color || '#000000';
+        updateTypeSignatureCanvas();
+      });
+    });
+
+    function updateTypeSignatureCanvas() {
+      const typeCanvas = document.getElementById('sigTypeCanvas');
+      if (!typeCanvas) return;
+      const tctx = typeCanvas.getContext('2d');
+      tctx.clearRect(0, 0, typeCanvas.width, typeCanvas.height);
+      const text = sigTextInput?.value || 'Your Signature';
+      tctx.fillStyle = sigColor;
+      tctx.font = `italic 54px ${sigFont}`;
+      tctx.textAlign = 'center';
+      tctx.textBaseline = 'middle';
+      tctx.fillText(text, typeCanvas.width / 2, typeCanvas.height / 2);
+    }
+
+    // Upload Tab
+    const uploadInput = document.getElementById('sigUploadFileInput');
+    const uploadBrowseBtn = document.getElementById('sigUploadBrowseBtn');
+    const uploadImgPreview = document.getElementById('sigUploadedImagePreview');
+    const uploadPlaceholder = document.getElementById('sigUploadPlaceholder');
+
+    uploadBrowseBtn?.addEventListener('click', () => uploadInput?.click());
+    uploadInput?.addEventListener('change', (e) => {
+      if (e.target.files && e.target.files[0]) {
+        const reader = new FileReader();
+        reader.onload = (re) => {
+          if (uploadImgPreview) {
+            uploadImgPreview.src = re.target.result;
+            uploadImgPreview.style.display = 'block';
+          }
+          if (uploadPlaceholder) uploadPlaceholder.style.display = 'none';
+        };
+        reader.readAsDataURL(e.target.files[0]);
+      }
+    });
+
+    // Apply Signature Button
+    document.getElementById('sigApplySignatureBtn')?.addEventListener('click', () => {
+      if (activeSignTab === 'draw') {
+        const drawCanvas = document.getElementById('sigDrawCanvas');
+        if (!hasDrawn || !drawCanvas) {
+          alert('Please draw your signature before applying.');
+          return;
+        }
+        currentSignatureDataUrl = drawCanvas.toDataURL('image/png');
+      } else if (activeSignTab === 'type') {
+        const typeCanvas = document.getElementById('sigTypeCanvas');
+        updateTypeSignatureCanvas();
+        currentSignatureDataUrl = typeCanvas.toDataURL('image/png');
+      } else if (activeSignTab === 'upload') {
+        if (!uploadImgPreview?.src || uploadImgPreview.style.display === 'none') {
+          alert('Please select an image file to use as a signature.');
+          return;
+        }
+        currentSignatureDataUrl = uploadImgPreview.src;
+      }
+
+      closeModal();
+      if (currentTool && currentTool.startsWith('sign')) {
+        renderSignPreview();
+        renderSettingsPanel();
+      }
+    });
+
+    // Modal submit handlers for Unlock and Protect modals
+    document.getElementById('modalUnlockSubmitBtn')?.addEventListener('click', async () => {
+      if (uploadedFiles.length === 0) return;
+      closeModal();
+      const pass = (document.getElementById('modalUnlockPasswordInput')?.value || '').trim();
+      showStatus('Unlocking PDF...', 'processing');
+      try {
+        const res = await PDFCore.unlockPDF(uploadedFiles[0].bytes.slice(), pass);
+        downloadFile(res, 'unlocked.pdf', 'application/pdf');
+        showSuccess('PDF unlocked successfully!');
+      } catch (err) {
+        showStatus(err.message, 'error');
+      }
+    });
+
+    document.getElementById('modalProtectSubmitBtn')?.addEventListener('click', async () => {
+      if (uploadedFiles.length === 0) return;
+      const pass = (document.getElementById('modalProtectPasswordInput')?.value || '').trim();
+      const confirmPass = (document.getElementById('modalProtectConfirmInput')?.value || '').trim();
+      if (!pass) {
+        alert('Password cannot be empty.');
+        return;
+      }
+      if (pass !== confirmPass) {
+        alert('Passwords do not match.');
+        return;
+      }
+      closeModal();
+      showStatus('Protecting PDF...', 'processing');
+      try {
+        const res = await PDFCore.protectPDF(uploadedFiles[0].bytes.slice(), pass);
+        downloadFile(res, 'protected.pdf', 'application/pdf');
+        showSuccess('PDF protected successfully!');
+      } catch (err) {
+        showStatus(err.message, 'error');
+      }
+    });
+
+    // Close modals on [data-close-modal] buttons or clicking backdrop
+    document.querySelectorAll('[data-close-modal]').forEach((btn) => {
+      btn.addEventListener('click', closeModal);
+    });
+    const modalContainer = document.getElementById('modalContainer');
+    if (modalContainer) {
+      modalContainer.addEventListener('click', (e) => {
+        if (e.target === modalContainer) closeModal();
+      });
+    }
+  }
+
+  // Initialize signature modal
+  initSignatureModal();
 });
