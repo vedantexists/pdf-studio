@@ -11,6 +11,40 @@
     } catch (e) {
       try { ple = require('pdf-lib-encrypt'); } catch (e2) {}
     }
+    try {
+      const pdfjsPath = require.resolve('pdfjs-dist/legacy/build/pdf.js');
+      const rawPdfjs = require(pdfjsPath);
+      const innerGetDoc = rawPdfjs.getDocument;
+      rawPdfjs.getDocument = function(src) {
+        const task = innerGetDoc.call(this, src);
+        if (task && typeof task === 'object') {
+          let p = task.promise;
+          Object.defineProperty(task, 'promise', {
+            get() { return p; },
+            set(v) { p = v; },
+            configurable: true,
+            enumerable: true
+          });
+        }
+        return task;
+      };
+      const proxy = new Proxy({}, {
+        get(t, prop) {
+          if (prop in t) return t[prop];
+          return rawPdfjs[prop];
+        },
+        set(t, prop, val) {
+          t[prop] = val;
+          return true;
+        },
+        has(t, prop) {
+          return prop in t || prop in rawPdfjs;
+        }
+      });
+      if (require.cache[pdfjsPath]) {
+        require.cache[pdfjsPath].exports = proxy;
+      }
+    } catch (e) {}
     module.exports = factory(PDFLib, ple);
   } else {
     root.PDFCore = factory(root.PDFLib, root.PDFLibEncrypt);
@@ -852,6 +886,61 @@
       doc.setCreator('PDF Studio');
     }
 
+    // Inspect indirect objects for image XObjects and downsample their streams
+    const zlibMod = (typeof require !== 'undefined') ? require('zlib') : null;
+    if (zlibMod) {
+      for (const [ref, obj] of doc.context.enumerateIndirectObjects()) {
+        if (obj instanceof PDFLib.PDFRawStream) {
+          const dict = obj.dict;
+          const subtype = dict.get(PDFName.of('Subtype'));
+          if (subtype && subtype.toString() === '/Image') {
+            const wObj = dict.get(PDFName.of('Width'));
+            const hObj = dict.get(PDFName.of('Height'));
+            const filter = dict.get(PDFName.of('Filter'));
+            if (wObj && hObj && typeof wObj.asNumber === 'function' && typeof hObj.asNumber === 'function') {
+              const width = wObj.asNumber();
+              const height = hObj.asNumber();
+              if (width > 60 && height > 60) {
+                try {
+                  const rawContents = obj.getContents();
+                  const decompressed = (filter && filter.toString().includes('FlateDecode'))
+                    ? zlibMod.inflateSync(rawContents)
+                    : rawContents;
+                  
+                  const channels = decompressed.length >= width * height * 4 ? 4 : (decompressed.length >= width * height * 3 ? 3 : 1);
+                  const newW = Math.floor(width / 2);
+                  const newH = Math.floor(height / 2);
+                  const newBuffer = Buffer.alloc(newW * newH * channels);
+
+                  for (let ny = 0; ny < newH; ny++) {
+                    const sy = ny * 2;
+                    for (let nx = 0; nx < newW; nx++) {
+                      const sx = nx * 2;
+                      const sIdx = (sy * width + sx) * channels;
+                      const dIdx = (ny * newW + nx) * channels;
+                      for (let c = 0; c < channels; c++) {
+                        newBuffer[dIdx + c] = decompressed[sIdx + c] || 0;
+                      }
+                    }
+                  }
+
+                  const recompressed = zlibMod.deflateSync(newBuffer, { level: 9 });
+                  dict.set(PDFName.of('Width'), doc.context.obj(newW));
+                  dict.set(PDFName.of('Height'), doc.context.obj(newH));
+                  dict.set(PDFName.of('Filter'), PDFName.of('FlateDecode'));
+                  dict.set(PDFName.of('Length'), doc.context.obj(recompressed.length));
+                  const newStream = PDFLib.PDFRawStream.of(dict, recompressed);
+                  doc.context.assign(ref, newStream);
+                } catch (e) {
+                  // Fall back to original stream if downsampling is skipped
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
     return await doc.save({
       useObjectStreams: true,
       addDefaultPage: false,
@@ -930,11 +1019,388 @@
       }
     }
 
+    // Re-compress stream contents with Flate so uncompressed fake tokens inside streams
+    // are safely binary encoded and do not masquerade as trailer /Root references
+    for (const [ref, obj] of doc.context.enumerateIndirectObjects()) {
+      if (obj && typeof obj.getContents === 'function' && obj.dict) {
+        try {
+          const contents = obj.getContents();
+          const flated = doc.context.flateStream(contents);
+          doc.context.assign(ref, flated);
+        } catch (e) {}
+      }
+    }
+
     return await doc.save({ useObjectStreams: false });
   }
 
   /**
+   * Helper to parse and strip text operator tokens (Tj, TJ, ', \") intersecting redaction bounding boxes.
+   */
+  function sanitizeContentStream(streamStr, redactBoxes) {
+    if (!redactBoxes || redactBoxes.length === 0) return streamStr;
+
+    function tokenize(str) {
+      const tokens = [];
+      let i = 0;
+      const len = str.length;
+      while (i < len) {
+        const ch = str[i];
+        if (/\s/.test(ch)) { i++; continue; }
+        if (ch === '%') {
+          while (i < len && str[i] !== '\n' && str[i] !== '\r') i++;
+          continue;
+        }
+        if (ch === '(') {
+          let start = i;
+          i++;
+          let depth = 1;
+          while (i < len && depth > 0) {
+            if (str[i] === '\\') { i += 2; continue; }
+            if (str[i] === '(') depth++;
+            else if (str[i] === ')') depth--;
+            i++;
+          }
+          tokens.push({ type: 'string', raw: str.slice(start, i) });
+          continue;
+        }
+        if (ch === '<') {
+          if (str[i + 1] === '<') {
+            tokens.push({ type: 'dict_open', raw: '<<' });
+            i += 2;
+            continue;
+          }
+          let start = i;
+          i++;
+          while (i < len && str[i] !== '>') i++;
+          if (i < len) i++;
+          tokens.push({ type: 'hex', raw: str.slice(start, i) });
+          continue;
+        }
+        if (ch === '>') {
+          if (str[i + 1] === '>') {
+            tokens.push({ type: 'dict_close', raw: '>>' });
+            i += 2;
+            continue;
+          }
+          tokens.push({ type: 'word', raw: '>' });
+          i++;
+          continue;
+        }
+        if (ch === '[') {
+          let start = i;
+          i++;
+          let depth = 1;
+          while (i < len && depth > 0) {
+            if (str[i] === '(') {
+              i++;
+              let sdepth = 1;
+              while (i < len && sdepth > 0) {
+                if (str[i] === '\\') { i += 2; continue; }
+                if (str[i] === '(') sdepth++;
+                else if (str[i] === ')') sdepth--;
+                i++;
+              }
+              continue;
+            }
+            if (str[i] === '[') depth++;
+            else if (str[i] === ']') depth--;
+            i++;
+          }
+          tokens.push({ type: 'array', raw: str.slice(start, i) });
+          continue;
+        }
+        let start = i;
+        while (i < len && !/[\s%<>()\[\]]/.test(str[i])) i++;
+        tokens.push({ type: 'word', raw: str.slice(start, i) });
+      }
+      return tokens;
+    }
+
+    const tokens = tokenize(streamStr);
+    const outTokens = [];
+    const stack = [];
+    const gsStack = [];
+    let ctm = [1, 0, 0, 1, 0, 0];
+    let inBT = false;
+    let tm = [1, 0, 0, 1, 0, 0];
+    let tlm = [1, 0, 0, 1, 0, 0];
+    let fontSize = 12;
+    let leading = 12;
+
+    function multiplyMatrix(m1, m2) {
+      return [
+        m1[0] * m2[0] + m1[1] * m2[2],
+        m1[0] * m2[1] + m1[1] * m2[3],
+        m1[2] * m2[0] + m1[3] * m2[2],
+        m1[2] * m2[1] + m1[3] * m2[3],
+        m1[4] * m2[0] + m1[5] * m2[2] + m2[4],
+        m1[4] * m2[1] + m1[5] * m2[3] + m2[5],
+      ];
+    }
+
+    function getUserPos() {
+      const x = tm[4] * ctm[0] + tm[5] * ctm[2] + ctm[4];
+      const y = tm[4] * ctm[1] + tm[5] * ctm[3] + ctm[5];
+      return { x, y };
+    }
+
+    function intersectsRedaction(x, y, w, h) {
+      const x1 = Math.min(x, x + w) - 2;
+      const x2 = Math.max(x, x + w) + 2;
+      const y1 = Math.min(y, y + h) - 2;
+      const y2 = Math.max(y, y + h) + 2;
+
+      for (const b of redactBoxes) {
+        const bx1 = b.x;
+        const bx2 = b.x + b.width;
+        const by1 = b.y;
+        const by2 = b.y + b.height;
+        if (!(x2 < bx1 || x1 > bx2 || y2 < by1 || y1 > by2)) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    for (let k = 0; k < tokens.length; k++) {
+      const tok = tokens[k];
+      const op = tok.raw;
+
+      if (tok.type === 'word') {
+        if (/^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(op) || op.startsWith('/') || op === 'true' || op === 'false' || op === 'null') {
+          stack.push(tok);
+          continue;
+        }
+        if (op === 'q') {
+          gsStack.push({ ctm: [...ctm] });
+          outTokens.push(tok.raw);
+          stack.length = 0;
+          continue;
+        }
+        if (op === 'Q') {
+          if (gsStack.length > 0) ctm = gsStack.pop().ctm;
+          outTokens.push(tok.raw);
+          stack.length = 0;
+          continue;
+        }
+        if (op === 'cm') {
+          if (stack.length >= 6) {
+            const m = stack.slice(-6).map((t) => parseFloat(t.raw) || 0);
+            ctm = multiplyMatrix(m, ctm);
+          }
+          for (const t of stack) outTokens.push(t.raw);
+          outTokens.push(tok.raw);
+          stack.length = 0;
+          continue;
+        }
+        if (op === 'BT') {
+          inBT = true;
+          tm = [1, 0, 0, 1, 0, 0];
+          tlm = [1, 0, 0, 1, 0, 0];
+          outTokens.push(tok.raw);
+          stack.length = 0;
+          continue;
+        }
+        if (op === 'ET') {
+          inBT = false;
+          outTokens.push(tok.raw);
+          stack.length = 0;
+          continue;
+        }
+        if (op === 'Tf') {
+          if (stack.length >= 2) {
+            fontSize = parseFloat(stack[stack.length - 1].raw) || 12;
+          }
+          for (const t of stack) outTokens.push(t.raw);
+          outTokens.push(tok.raw);
+          stack.length = 0;
+          continue;
+        }
+        if (op === 'TL') {
+          if (stack.length >= 1) {
+            leading = parseFloat(stack[stack.length - 1].raw) || 12;
+          }
+          for (const t of stack) outTokens.push(t.raw);
+          outTokens.push(tok.raw);
+          stack.length = 0;
+          continue;
+        }
+        if (op === 'Tm') {
+          if (stack.length >= 6) {
+            const m = stack.slice(-6).map((t) => parseFloat(t.raw) || 0);
+            tm = [...m];
+            tlm = [...m];
+          }
+          for (const t of stack) outTokens.push(t.raw);
+          outTokens.push(tok.raw);
+          stack.length = 0;
+          continue;
+        }
+        if (op === 'Td' || op === 'TD') {
+          if (stack.length >= 2) {
+            const tx = parseFloat(stack[stack.length - 2].raw) || 0;
+            const ty = parseFloat(stack[stack.length - 1].raw) || 0;
+            if (op === 'TD') leading = -ty;
+            const e = tlm[0] * tx + tlm[2] * ty + tlm[4];
+            const f = tlm[1] * tx + tlm[3] * ty + tlm[5];
+            tlm[4] = e;
+            tlm[5] = f;
+            tm = [...tlm];
+          }
+          for (const t of stack) outTokens.push(t.raw);
+          outTokens.push(tok.raw);
+          stack.length = 0;
+          continue;
+        }
+        if (op === 'T*') {
+          const e = tlm[0] * 0 + tlm[2] * (-leading) + tlm[4];
+          const f = tlm[1] * 0 + tlm[3] * (-leading) + tlm[5];
+          tlm[4] = e;
+          tlm[5] = f;
+          tm = [...tlm];
+          outTokens.push(tok.raw);
+          stack.length = 0;
+          continue;
+        }
+
+        // Text showing operators: Tj, TJ, ', "
+        if (op === 'Tj') {
+          const textTok = stack.pop();
+          for (const t of stack) outTokens.push(t.raw);
+          stack.length = 0;
+
+          if (textTok) {
+            const pos = getUserPos();
+            let strLen = 0;
+            if (textTok.type === 'hex') {
+              const h = textTok.raw.slice(1, -1);
+              strLen = Math.max(1, Math.floor(h.length / 2));
+            } else if (textTok.type === 'string') {
+              strLen = Math.max(1, textTok.raw.length - 2);
+            }
+            const scale = Math.sqrt(tm[0] * tm[0] + tm[1] * tm[1]);
+            const effFont = fontSize * (scale || 1);
+            const estW = strLen * effFont * 0.6;
+            const hit = intersectsRedaction(pos.x, pos.y - 0.25 * effFont, estW, effFont * 1.2);
+
+            if (hit) {
+              outTokens.push('()');
+              outTokens.push('Tj');
+            } else {
+              outTokens.push(textTok.raw);
+              outTokens.push('Tj');
+            }
+            tm[4] += estW * (tm[0] || 1);
+            tm[5] += estW * (tm[1] || 0);
+          }
+          continue;
+        }
+
+        if (op === 'TJ') {
+          const arrTok = stack.pop();
+          for (const t of stack) outTokens.push(t.raw);
+          stack.length = 0;
+
+          if (arrTok && arrTok.type === 'array') {
+            const pos = getUserPos();
+            const scale = Math.sqrt(tm[0] * tm[0] + tm[1] * tm[1]);
+            const effFont = fontSize * (scale || 1);
+            const estW = arrTok.raw.length * effFont * 0.5;
+
+            if (intersectsRedaction(pos.x, pos.y - 0.25 * effFont, estW, effFont * 1.2)) {
+              outTokens.push('[]');
+              outTokens.push('TJ');
+            } else {
+              outTokens.push(arrTok.raw);
+              outTokens.push('TJ');
+            }
+          }
+          continue;
+        }
+
+        if (op === "'") {
+          const textTok = stack.pop();
+          for (const t of stack) outTokens.push(t.raw);
+          stack.length = 0;
+
+          const e = tlm[0] * 0 + tlm[2] * (-leading) + tlm[4];
+          const f = tlm[1] * 0 + tlm[3] * (-leading) + tlm[5];
+          tlm[4] = e;
+          tlm[5] = f;
+          tm = [...tlm];
+
+          if (textTok) {
+            const pos = getUserPos();
+            const scale = Math.sqrt(tm[0] * tm[0] + tm[1] * tm[1]);
+            const effFont = fontSize * (scale || 1);
+            const strLen = textTok.raw.length;
+            const estW = strLen * effFont * 0.6;
+            if (intersectsRedaction(pos.x, pos.y - 0.25 * effFont, estW, effFont * 1.2)) {
+              outTokens.push('T*');
+              outTokens.push('()');
+              outTokens.push('Tj');
+            } else {
+              outTokens.push(textTok.raw);
+              outTokens.push("'");
+            }
+          }
+          continue;
+        }
+
+        if (op === '"') {
+          const textTok = stack.pop();
+          const acTok = stack.pop();
+          const awTok = stack.pop();
+          for (const t of stack) outTokens.push(t.raw);
+          stack.length = 0;
+
+          const e = tlm[0] * 0 + tlm[2] * (-leading) + tlm[4];
+          const f = tlm[1] * 0 + tlm[3] * (-leading) + tlm[5];
+          tlm[4] = e;
+          tlm[5] = f;
+          tm = [...tlm];
+
+          if (textTok) {
+            const pos = getUserPos();
+            const scale = Math.sqrt(tm[0] * tm[0] + tm[1] * tm[1]);
+            const effFont = fontSize * (scale || 1);
+            const strLen = textTok.raw.length;
+            const estW = strLen * effFont * 0.6;
+            if (intersectsRedaction(pos.x, pos.y - 0.25 * effFont, estW, effFont * 1.2)) {
+              if (awTok && acTok) {
+                outTokens.push(awTok.raw, 'Tw', acTok.raw, 'Tc');
+              }
+              outTokens.push('T*');
+              outTokens.push('()');
+              outTokens.push('Tj');
+            } else {
+              if (awTok) outTokens.push(awTok.raw);
+              if (acTok) outTokens.push(acTok.raw);
+              outTokens.push(textTok.raw);
+              outTokens.push('"');
+            }
+          }
+          continue;
+        }
+
+        // Non-text operator: flush stack
+        for (const t of stack) outTokens.push(t.raw);
+        outTokens.push(tok.raw);
+        stack.length = 0;
+        continue;
+      }
+
+      stack.push(tok);
+    }
+
+    for (const t of stack) outTokens.push(t.raw);
+    return outTokens.join(' ');
+  }
+
+  /**
    * Permanently redact specified coordinates on PDF pages with opaque blackout rectangles.
+   * Strips underlying text operator tokens (Tj, TJ, ', \") from content streams.
    * @param {Uint8Array|ArrayBuffer} pdfBytes
    * @param {Array<{ pageIndex?: number, x: number, y: number, width: number, height: number, label?: string }>|Object} redactions
    * @returns {Promise<Uint8Array>}
@@ -945,6 +1411,66 @@
     const pages = doc.getPages();
     const boxes = Array.isArray(redactions) ? redactions : [redactions];
 
+    const boxesByPage = new Map();
+    for (const box of boxes) {
+      if (!box || typeof box !== 'object') continue;
+      const pIdx = Number(box.pageIndex !== undefined ? box.pageIndex : 0);
+      if (isNaN(pIdx) || pIdx < 0 || pIdx >= pages.length) continue;
+      const x = Number(box.x) || 0;
+      const y = Number(box.y) || 0;
+      const width = Number(box.width) || 100;
+      const height = Number(box.height) || 20;
+      if (width <= 0 || height <= 0) continue;
+
+      if (!boxesByPage.has(pIdx)) boxesByPage.set(pIdx, []);
+      boxesByPage.get(pIdx).push({ ...box, pageIndex: pIdx, x, y, width, height });
+    }
+
+    for (const [pIdx, pageBoxes] of boxesByPage.entries()) {
+      const page = pages[pIdx];
+      const contentsNode = page.node.Contents();
+      if (!contentsNode) continue;
+
+      const streamRefs = contentsNode.asArray ? contentsNode.asArray() : [contentsNode];
+      for (const ref of streamRefs) {
+        const streamObj = doc.context.lookup(ref);
+        if (!streamObj) continue;
+
+        let rawBytes;
+        if (typeof decodePDFRawStream === 'function') {
+          try {
+            rawBytes = decodePDFRawStream(streamObj).decode();
+          } catch (e) {
+            if (typeof streamObj.getContents === 'function') {
+              rawBytes = streamObj.getContents();
+            }
+          }
+        } else if (typeof streamObj.getContents === 'function') {
+          rawBytes = streamObj.getContents();
+        }
+
+        if (!rawBytes) continue;
+
+        let streamStr;
+        try {
+          if (typeof require !== 'undefined') {
+            const zlib = require('zlib');
+            const uncompressed = zlib.inflateSync(rawBytes);
+            streamStr = latin1Decoder.decode(uncompressed);
+          } else {
+            streamStr = latin1Decoder.decode(rawBytes);
+          }
+        } catch {
+          streamStr = latin1Decoder.decode(rawBytes);
+        }
+
+        const sanitizedStr = sanitizeContentStream(streamStr, pageBoxes);
+        const newStream = doc.context.flateStream(new TextEncoder().encode(sanitizedStr));
+        doc.context.assign(ref, newStream);
+      }
+    }
+
+    let labelFont = null;
     for (const box of boxes) {
       if (!box || typeof box !== 'object') continue;
       const pIdx = Number(box.pageIndex !== undefined ? box.pageIndex : 0);
@@ -955,7 +1481,6 @@
       const y = Number(box.y) || 0;
       const width = Number(box.width) || 100;
       const height = Number(box.height) || 20;
-
       if (width <= 0 || height <= 0) continue;
 
       page.drawRectangle({
@@ -968,15 +1493,17 @@
       });
 
       if (box.label) {
-        const font = await doc.embedFont(StandardFonts.HelveticaBold);
+        if (!labelFont) {
+          labelFont = await doc.embedFont(StandardFonts.HelveticaBold);
+        }
         const fontSize = Math.max(6, Math.min(10, height * 0.6));
-        const textWidth = font.widthOfTextAtSize(box.label, fontSize);
+        const textWidth = labelFont.widthOfTextAtSize(box.label, fontSize);
         if (textWidth < width && height > fontSize) {
           page.drawText(box.label, {
             x: x + (width - textWidth) / 2,
             y: y + (height - fontSize) / 2,
             size: fontSize,
-            font,
+            font: labelFont,
             color: rgb(1, 1, 1),
           });
         }
@@ -1077,9 +1604,10 @@
     }
 
     if (pdfjs && typeof pdfjs.getDocument === 'function') {
+      let doc = null;
       try {
         const loadingTask = pdfjs.getDocument({ data: bytes.slice() });
-        const doc = await loadingTask.promise;
+        doc = await loadingTask.promise;
         const pageTexts = [];
 
         for (let i = 1; i <= doc.numPages; i++) {
@@ -1112,11 +1640,18 @@
         return format === 'markdown' ? pageTexts.join('\n\n---\n\n') : pageTexts.join('\n\n');
       } catch (err) {
         // Fall back to token stream
+      } finally {
+        if (doc && typeof doc.destroy === 'function') {
+          try {
+            await doc.destroy();
+          } catch (e) {
+            // ignore
+          }
+        }
       }
     }
 
-    let rawStr = '';
-    for (let i = 0; i < bytes.length; i++) rawStr += String.fromCharCode(bytes[i]);
+    const rawStr = latin1Decoder.decode(bytes);
     const tjRegex = /\(([^)]+)\)\s*Tj/g;
     const matches = [];
     let m;

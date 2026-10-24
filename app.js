@@ -220,9 +220,185 @@ document.addEventListener('DOMContentLoaded', () => {
       multiple: false,
       description: 'Extract specific pages or custom ranges into a new standalone PDF or ZIP archive.',
     },
+    'scan-to-pdf': {
+      title: 'Scan to PDF',
+      icon: '📷',
+      actionText: 'Open Camera Scanner',
+      accept: '.pdf,application/pdf,image/*',
+      acceptImages: true,
+      maxFiles: Infinity,
+      multiple: true,
+      description: 'Capture documents directly from camera, apply auto-contrast, and compile into PDF.',
+    },
+    'compress': {
+      title: 'Compress PDF',
+      icon: '⚡',
+      actionText: 'Compress PDF',
+      accept: '.pdf,application/pdf',
+      acceptImages: false,
+      maxFiles: 1,
+      multiple: false,
+      description: 'Reduce file size while keeping visual quality with smart image downsampling.',
+    },
+    'repair': {
+      title: 'Repair PDF',
+      icon: '🩹',
+      actionText: 'Repair PDF',
+      accept: '.pdf,application/pdf',
+      acceptImages: false,
+      maxFiles: 1,
+      multiple: false,
+      description: 'Fix damaged or corrupted PDFs and reconstruct broken cross-reference tables.',
+    },
+    'ocr-pdf': {
+      title: 'OCR PDF',
+      icon: '🔍',
+      actionText: 'Perform OCR',
+      accept: '.pdf,application/pdf',
+      acceptImages: false,
+      maxFiles: 1,
+      multiple: false,
+      description: 'Recognize scanned text and add a searchable, selectable text layer with client-side OCR.',
+    },
+    'word-to-pdf': {
+      title: 'Word to PDF',
+      icon: '📘',
+      actionText: 'Convert to PDF',
+      accept: '.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      acceptImages: false,
+      maxFiles: 1,
+      multiple: false,
+      description: 'Convert Word documents (.docx) to PDF with accurate layout and pagination.',
+    },
+    'powerpoint-to-pdf': {
+      title: 'PowerPoint to PDF',
+      icon: '📊',
+      actionText: 'Convert to PDF',
+      accept: '.pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      acceptImages: false,
+      maxFiles: 1,
+      multiple: false,
+      description: 'Convert PowerPoint presentations to clean PDF slides.',
+    },
+    'excel-to-pdf': {
+      title: 'Excel to PDF',
+      icon: '📗',
+      actionText: 'Convert to PDF',
+      accept: '.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      acceptImages: false,
+      maxFiles: 1,
+      multiple: false,
+      description: 'Convert Excel spreadsheets into neat paginated PDF tables.',
+    },
+    'html-to-pdf': {
+      title: 'HTML to PDF',
+      icon: '🌐',
+      actionText: 'Convert to PDF',
+      accept: '.html,.htm,text/html',
+      acceptImages: false,
+      maxFiles: 1,
+      multiple: false,
+      description: 'Render HTML web documents into formatted, printable PDF files.',
+    },
+    'pdf-to-word': {
+      title: 'PDF to Word',
+      icon: '📄',
+      actionText: 'Convert to Word',
+      accept: '.pdf,application/pdf',
+      acceptImages: false,
+      maxFiles: 1,
+      multiple: false,
+      description: 'Extract and convert PDF text and tables into editable Microsoft Word (.docx) files.',
+    },
+    'pdf-to-powerpoint': {
+      title: 'PDF to PowerPoint',
+      icon: '📑',
+      actionText: 'Convert to PPTX',
+      accept: '.pdf,application/pdf',
+      acceptImages: false,
+      maxFiles: 1,
+      multiple: false,
+      description: 'Transform PDF pages into editable PowerPoint (.pptx) slides.',
+    },
+    'pdf-to-excel': {
+      title: 'PDF to Excel',
+      icon: '📈',
+      actionText: 'Convert to Excel',
+      accept: '.pdf,application/pdf',
+      acceptImages: false,
+      maxFiles: 1,
+      multiple: false,
+      description: 'Extract data and table structures from PDF into Excel (.xlsx) spreadsheets.',
+    },
+    'pdf-to-pdfa': {
+      title: 'PDF to PDF/A',
+      icon: '🏛️',
+      actionText: 'Convert to PDF/A',
+      accept: '.pdf,application/pdf',
+      acceptImages: false,
+      maxFiles: 1,
+      multiple: false,
+      description: 'Convert standard PDFs to ISO-standardized PDF/A for long-term document archiving.',
+    },
+    'pdf-to-text': {
+      title: 'PDF to Text',
+      icon: '📝',
+      actionText: 'Extract Text',
+      accept: '.pdf,application/pdf',
+      acceptImages: false,
+      maxFiles: 1,
+      multiple: false,
+      description: 'Extract clean plain text or formatted Markdown from PDF pages.',
+    },
+    'edit-pdf': {
+      title: 'Edit PDF',
+      icon: '✏️',
+      actionText: 'Save Edited PDF',
+      accept: '.pdf,application/pdf',
+      acceptImages: false,
+      maxFiles: 1,
+      multiple: false,
+      description: 'Add freehand drawing, highlighter, annotations, and shapes directly to PDF pages.',
+    },
+    'redact': {
+      title: 'Redact PDF',
+      icon: '⬛',
+      actionText: 'Apply Redaction',
+      accept: '.pdf,application/pdf',
+      acceptImages: false,
+      maxFiles: 1,
+      multiple: false,
+      description: 'Permanently remove sensitive text and graphics with irreversible blackout boxes.',
+    },
+    'compare': {
+      title: 'Compare PDF',
+      icon: '⚖️',
+      actionText: 'Compare Documents',
+      accept: '.pdf,application/pdf',
+      acceptImages: false,
+      maxFiles: 2,
+      multiple: true,
+      description: 'Compare two PDF documents side-by-side or with interactive difference overlay.',
+    },
+    'text-to-pdf': {
+      title: 'Text to PDF',
+      icon: '📋',
+      actionText: 'Convert to PDF',
+      accept: '.txt,.md,text/plain,text/markdown',
+      acceptImages: false,
+      maxFiles: 1,
+      multiple: false,
+      description: 'Convert plain text notes or markdown into clean, paginated PDF documents.',
+    },
   };
 
   // Aliases for hyphenated variants
+  TOOLS['scan'] = TOOLS['scan-to-pdf'];
+  TOOLS['compress-pdf'] = TOOLS['compress'];
+  TOOLS['repair-pdf'] = TOOLS['repair'];
+  TOOLS['ocr'] = TOOLS['ocr-pdf'];
+  TOOLS['redact-pdf'] = TOOLS['redact'];
+  TOOLS['compare-pdf'] = TOOLS['compare'];
   TOOLS['sign-pdf'] = TOOLS['sign'];
   TOOLS['unlock-pdf'] = TOOLS['unlock'];
   TOOLS['protect-pdf'] = TOOLS['protect'];
@@ -236,12 +412,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Category mapping for active indicator
   const CATEGORY_MAP = {
-    'organize': ['merge', 'split', 'remove-pages', 'extract-pages', 'organize'],
-    'optimize': ['compress'],
-    'convert-to': ['pdf-to-img'],
-    'convert-from': ['img-to-pdf'],
-    'edit': ['rotate', 'page-numbers', 'watermark', 'crop', 'crop-pdf', 'forms', 'pdf-forms'],
-    'security': ['unlock', 'unlock-pdf', 'protect', 'protect-pdf', 'sign', 'sign-pdf'],
+    'organize': ['merge', 'split', 'remove-pages', 'extract-pages', 'organize', 'scan-to-pdf'],
+    'optimize': ['compress', 'repair', 'ocr-pdf'],
+    'convert-to': ['img-to-pdf', 'word-to-pdf', 'powerpoint-to-pdf', 'excel-to-pdf', 'html-to-pdf'],
+    'convert-from': ['pdf-to-img', 'pdf-to-word', 'pdf-to-powerpoint', 'pdf-to-excel', 'pdf-to-pdfa', 'pdf-to-text'],
+    'edit': ['rotate', 'page-numbers', 'watermark', 'edit-pdf', 'crop', 'redact', 'crop-pdf', 'forms', 'pdf-forms'],
+    'security': ['unlock', 'protect', 'sign', 'compare', 'unlock-pdf', 'protect-pdf', 'sign-pdf', 'compare-pdf'],
   };
 
   function updateActiveNavIndicator(toolKey) {
@@ -346,7 +522,7 @@ document.addEventListener('DOMContentLoaded', () => {
     link.addEventListener('click', (e) => {
       e.preventDefault();
       const tool = link.dataset.tool;
-      if (link.classList.contains('is-disabled') || tool === 'compress') {
+      if (link.classList.contains('is-disabled')) {
         alert('Compress PDF is coming soon! All processing is 100% client-side in your browser.');
         closeMobileDrawer();
         closeAllDropdowns();
@@ -2336,6 +2512,138 @@ document.addEventListener('DOMContentLoaded', () => {
         showSuccess('Your PDF has been successfully cropped!');
       } else if (currentTool === 'forms' || currentTool === 'pdf-forms') {
         await executeFormAction(false);
+      } else if (currentTool === 'compress' || currentTool === 'compress-pdf') {
+        const srcBytes = uploadedFiles[0].bytes.slice();
+        const preset = document.querySelector('input[name="compressPreset"]:checked')?.value || 'recommended';
+        const stripMetadata = document.getElementById('compressStripMetadata')?.checked ?? true;
+        const compressedBytes = await PDFCore.compressPDF(srcBytes, { level: preset, stripMetadata });
+        const oldSize = srcBytes.length;
+        const newSize = compressedBytes.length;
+        const ratio = oldSize > 0 ? Math.round(((oldSize - newSize) / oldSize) * 100) : 0;
+        downloadFile(compressedBytes, 'compressed.pdf', 'application/pdf');
+        showSuccess(`Compressed from ${(oldSize / 1024).toFixed(1)} KB to ${(newSize / 1024).toFixed(1)} KB (${ratio >= 0 ? '-' + ratio + '%' : '+0%'})!`);
+      } else if (currentTool === 'repair' || currentTool === 'repair-pdf') {
+        const srcBytes = uploadedFiles[0].bytes.slice();
+        const repairedBytes = await PDFCore.repairPDF(srcBytes);
+        downloadFile(repairedBytes, 'repaired.pdf', 'application/pdf');
+        showSuccess('PDF repaired and cross-reference tables reconstructed successfully!');
+      } else if (currentTool === 'redact' || currentTool === 'redact-pdf') {
+        const srcBytes = uploadedFiles[0].bytes.slice();
+        const pageIdx = parseInt(document.getElementById('redactPageSelect')?.value || '0', 10);
+        const label = document.getElementById('redactLabelInput')?.value || '';
+        const x = parseFloat(document.getElementById('redactX')?.value || '50');
+        const y = parseFloat(document.getElementById('redactY')?.value || '450');
+        const width = parseFloat(document.getElementById('redactW')?.value || '250');
+        const height = parseFloat(document.getElementById('redactH')?.value || '30');
+        const redactedBytes = await PDFCore.redactPDF(srcBytes, [{
+          pageIndex: pageIdx,
+          x,
+          y,
+          width,
+          height,
+          label: label || undefined,
+        }]);
+        downloadFile(redactedBytes, 'redacted.pdf', 'application/pdf');
+        showSuccess('Document text purged and redacted successfully!');
+      } else if (currentTool === 'compare' || currentTool === 'compare-pdf') {
+        if (uploadedFiles.length < 2) {
+          throw new Error('Please select at least 2 PDF files to compare revisions.');
+        }
+        showStatus('Comparing revisions...', 'processing');
+        const fileA = uploadedFiles[0].bytes.slice();
+        const fileB = uploadedFiles[1].bytes.slice();
+        if (!window.pdfjsLib) throw new Error('PDF.js rendering engine is not loaded.');
+        const pdfA = await window.pdfjsLib.getDocument({ data: fileA }).promise;
+        const pdfB = await window.pdfjsLib.getDocument({ data: fileB }).promise;
+        const pageA = await pdfA.getPage(1);
+        const pageB = await pdfB.getPage(1);
+        const vpA = pageA.getViewport({ scale: 1.5 });
+        const vpB = pageB.getViewport({ scale: 1.5 });
+        const canvasA = document.createElement('canvas');
+        canvasA.width = vpA.width;
+        canvasA.height = vpA.height;
+        const canvasB = document.createElement('canvas');
+        canvasB.width = vpB.width;
+        canvasB.height = vpB.height;
+        await pageA.render({ canvasContext: canvasA.getContext('2d'), viewport: vpA }).promise;
+        await pageB.render({ canvasContext: canvasB.getContext('2d'), viewport: vpB }).promise;
+        await pdfA.destroy();
+        await pdfB.destroy();
+
+        const diffCanvas = document.createElement('canvas');
+        diffCanvas.width = Math.max(canvasA.width, canvasB.width);
+        diffCanvas.height = Math.max(canvasA.height, canvasB.height);
+        const diffCtx = diffCanvas.getContext('2d');
+        const imgA = canvasA.getContext('2d').getImageData(0, 0, canvasA.width, canvasA.height);
+        const imgB = canvasB.getContext('2d').getImageData(0, 0, canvasB.width, canvasB.height);
+        const diffImg = diffCtx.createImageData(diffCanvas.width, diffCanvas.height);
+
+        let diffPixelCount = 0;
+        const minW = Math.min(canvasA.width, canvasB.width);
+        const minH = Math.min(canvasA.height, canvasB.height);
+
+        for (let y = 0; y < minH; y++) {
+          for (let x = 0; x < minW; x++) {
+            const iA = (y * canvasA.width + x) * 4;
+            const iB = (y * canvasB.width + x) * 4;
+            const iDiff = (y * diffCanvas.width + x) * 4;
+            const dr = Math.abs(imgA.data[iA] - imgB.data[iB]);
+            const dg = Math.abs(imgA.data[iA + 1] - imgB.data[iB + 1]);
+            const db = Math.abs(imgA.data[iA + 2] - imgB.data[iB + 2]);
+            if (dr + dg + db > 40) {
+              diffPixelCount++;
+              diffImg.data[iDiff] = 255;
+              diffImg.data[iDiff + 1] = 0;
+              diffImg.data[iDiff + 2] = 128;
+              diffImg.data[iDiff + 3] = 255;
+            } else {
+              diffImg.data[iDiff] = imgA.data[iA];
+              diffImg.data[iDiff + 1] = imgA.data[iA + 1];
+              diffImg.data[iDiff + 2] = imgA.data[iA + 2];
+              diffImg.data[iDiff + 3] = 180;
+            }
+          }
+        }
+        diffCtx.putImageData(diffImg, 0, 0);
+
+        diffCanvas.toBlob((blob) => {
+          downloadBlob(blob, 'revision_comparison_diff.png');
+          showSuccess(`Comparison complete! Found ${diffPixelCount > 0 ? diffPixelCount + ' modified pixels' : 'no visual differences'}. Downloaded diff image.`);
+        }, 'image/png');
+      } else if (currentTool === 'scan-to-pdf') {
+        if (uploadedFiles.length === 0) {
+          throw new Error('Please capture or select at least one page image to compile into a PDF.');
+        }
+        const imgList = uploadedFiles.map(f => ({
+          bytes: f.bytes,
+          type: (f.file && f.file.type && f.file.type.includes('png')) ? 'png' : 'jpeg',
+        }));
+        const pdfBytes = await PDFCore.imagesToPDF(imgList, { pageSize: 'a4', margin: 20 });
+        downloadFile(pdfBytes, 'scanned_document.pdf', 'application/pdf');
+        showSuccess(`Compiled ${imgList.length} scanned page(s) into PDF!`);
+      } else if (currentTool === 'text-to-pdf' || currentTool === 'txt-to-pdf') {
+        let textContent = '';
+        const editor = document.getElementById('textToPdfInput');
+        if (editor && editor.value) {
+          textContent = editor.value;
+        } else if (uploadedFiles[0] && uploadedFiles[0].bytes) {
+          textContent = new TextDecoder('utf-8').decode(uploadedFiles[0].bytes);
+        }
+        if (!textContent.trim()) throw new Error('Please enter text or upload a text file to convert.');
+        const fontSize = parseInt(document.getElementById('txtFontSize')?.value || '12', 10);
+        const margin = parseInt(document.getElementById('txtMargin')?.value || '50', 10);
+        const pdfBytes = await PDFCore.textToPDF(textContent, { fontSize, margin });
+        downloadFile(pdfBytes, 'converted_text.pdf', 'application/pdf');
+        showSuccess('Text document successfully converted to PDF!');
+      } else if (currentTool === 'pdf-to-text' || currentTool === 'pdf-to-txt') {
+        const srcBytes = uploadedFiles[0].bytes.slice();
+        const format = document.getElementById('txtOutputFormat')?.value || 'markdown';
+        const extractedText = await PDFCore.pdfToText(srcBytes, { format });
+        const ext = format === 'markdown' ? 'md' : 'txt';
+        const mime = format === 'markdown' ? 'text/markdown;charset=utf-8' : 'text/plain;charset=utf-8';
+        const blob = new Blob([extractedText], { type: mime });
+        downloadBlob(blob, `extracted_text.${ext}`);
+        showSuccess(`Successfully extracted text to .${ext}!`);
       }
     } catch (err) {
       console.error(err);
