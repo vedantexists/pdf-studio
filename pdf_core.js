@@ -1110,6 +1110,145 @@
   }
 
 
+  /**
+   * Convert plain text or markdown formatted strings into clean, paginated PDF pages.
+   * @param {string} text
+   * @param {Object} [options={}] - { fontSize, margin, pageSize }
+   * @returns {Promise<Uint8Array>}
+   */
+  async function textToPDF(text, options = {}) {
+    if (typeof text !== 'string') throw new Error('Text string is required to convert to PDF.');
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const fontSize = options.fontSize || 12;
+    const lineHeight = fontSize * 1.4;
+    const margin = options.margin !== undefined ? options.margin : 50;
+    const pageWidth = 595.28; // Standard A4
+    const pageHeight = 841.89;
+    const maxLineWidth = pageWidth - margin * 2;
+    const linesPerPage = Math.max(1, Math.floor((pageHeight - margin * 2) / lineHeight));
+
+    const rawLines = text.split(/\r?\n/);
+    const wrappedLines = [];
+
+    for (const rawLine of rawLines) {
+      if (!rawLine.trim()) {
+        wrappedLines.push('');
+        continue;
+      }
+      const words = rawLine.split(' ');
+      let currentLine = '';
+      for (const word of words) {
+        const candidate = currentLine ? currentLine + ' ' + word : word;
+        try {
+          if (font.widthOfTextAtSize(candidate, fontSize) <= maxLineWidth) {
+            currentLine = candidate;
+          } else {
+            if (currentLine) wrappedLines.push(currentLine);
+            currentLine = word;
+          }
+        } catch {
+          const sanitized = word.replace(/[^\x20-\x7E]/g, '');
+          currentLine = currentLine ? currentLine + ' ' + sanitized : sanitized;
+        }
+      }
+      if (currentLine) wrappedLines.push(currentLine);
+    }
+
+    const totalPages = Math.max(1, Math.ceil(wrappedLines.length / linesPerPage));
+    for (let p = 0; p < totalPages; p++) {
+      const page = doc.addPage([pageWidth, pageHeight]);
+      const pageSlice = wrappedLines.slice(p * linesPerPage, (p + 1) * linesPerPage);
+      let y = pageHeight - margin - fontSize;
+      for (const line of pageSlice) {
+        if (line) {
+          try {
+            page.drawText(line, { x: margin, y, size: fontSize, font, color: rgb(0.1, 0.1, 0.1) });
+          } catch {
+            const clean = line.replace(/[^\x20-\x7E]/g, '');
+            page.drawText(clean, { x: margin, y, size: fontSize, font, color: rgb(0.1, 0.1, 0.1) });
+          }
+        }
+        y -= lineHeight;
+      }
+    }
+
+    return await doc.save();
+  }
+
+  /**
+   * Extract plain text or markdown formatted text from PDF bytes.
+   * Works using PDF.js when available, or built-in token stream text decoder.
+   * @param {Uint8Array|ArrayBuffer} pdfBytes
+   * @param {Object} [options={}] - { format: 'plain'|'markdown' }
+   * @returns {Promise<string>}
+   */
+  async function pdfToText(pdfBytes, options = {}) {
+    if (!pdfBytes) throw new Error('PDF bytes are required to extract text.');
+    const format = options.format || 'markdown';
+    const bytes = pdfBytes instanceof Uint8Array ? pdfBytes : new Uint8Array(pdfBytes);
+
+    let pdfjs = null;
+    if (typeof window !== 'undefined' && window.pdfjsLib) {
+      pdfjs = window.pdfjsLib;
+    } else if (typeof require !== 'undefined') {
+      try {
+        pdfjs = require('pdfjs-dist/legacy/build/pdf.js');
+      } catch (e) {
+        try { pdfjs = require('pdfjs-dist'); } catch (e2) {}
+      }
+    }
+
+    if (pdfjs && typeof pdfjs.getDocument === 'function') {
+      try {
+        const loadingTask = pdfjs.getDocument({ data: bytes.slice() });
+        const doc = await loadingTask.promise;
+        const pageTexts = [];
+
+        for (let i = 1; i <= doc.numPages; i++) {
+          const page = await doc.getPage(i);
+          const textContent = await page.getTextContent();
+          const pageLines = [];
+          let currentY = null;
+          let currentLine = [];
+
+          for (const item of textContent.items) {
+            const y = Math.round(item.transform ? item.transform[5] : 0);
+            if (currentY === null || Math.abs(currentY - y) > 3) {
+              if (currentLine.length > 0) pageLines.push(currentLine.join(' '));
+              currentLine = [item.str];
+              currentY = y;
+            } else {
+              currentLine.push(item.str);
+            }
+          }
+          if (currentLine.length > 0) pageLines.push(currentLine.join(' '));
+
+          const pageBody = pageLines.join('\n');
+          if (format === 'markdown') {
+            pageTexts.push(`## Page ${i}\n\n${pageBody}`);
+          } else {
+            pageTexts.push(pageBody);
+          }
+        }
+
+        return format === 'markdown' ? pageTexts.join('\n\n---\n\n') : pageTexts.join('\n\n');
+      } catch (err) {
+        // Fall back to token stream
+      }
+    }
+
+    let rawStr = '';
+    for (let i = 0; i < bytes.length; i++) rawStr += String.fromCharCode(bytes[i]);
+    const tjRegex = /\(([^)]+)\)\s*Tj/g;
+    const matches = [];
+    let m;
+    while ((m = tjRegex.exec(rawStr)) !== null) {
+      matches.push(m[1]);
+    }
+    return matches.join(' ');
+  }
+
   return {
     mergePDFs,
     splitPDF,
@@ -1131,5 +1270,7 @@
     compressPDF,
     repairPDF,
     redactPDF,
+    textToPDF,
+    pdfToText,
   };
 });

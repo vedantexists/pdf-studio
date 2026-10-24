@@ -29,6 +29,9 @@
 - **Conversion**:
   - **PDF to JPG / PNG**: Convert PDF pages into crisp high-resolution images (individual or ZIP).
   - **JPG / PNG to PDF**: Assemble images into a formatted PDF document with customizable margins.
+  - **Scan to PDF**: Capture multi-page documents directly using your mobile camera or desktop webcam.
+  - **Text to PDF**: Convert plain text or markdown notes into cleanly formatted, paginated PDF documents.
+  - **PDF to Text / Markdown**: Extract structured text, paragraphs, and headings from PDFs into clean Markdown or TXT.
 - **Enhance & Edit**:
   - **Rotate PDF**: Rotate all or specific pages 90°, 180°, or 270°.
   - **Watermark PDF**: Add custom text watermarks with control over opacity, font size, angle, and color.

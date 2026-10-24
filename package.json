@@ -5,7 +5,7 @@
   "main": "app.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node test/test_core.js && node test/test_phase1.js && node test/test_phase2.js"
+    "test": "node test/test_core.js && node test/test_phase1.js && node test/test_phase2.js && node test/test_phase3.js"
   },
   "keywords": [
     "pdf",

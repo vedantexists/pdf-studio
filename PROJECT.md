@@ -35,10 +35,12 @@
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| M1 | Mega-Menu Header & Modular Navigation | Semantic mega-menu in `index.html`, responsive CSS in `style.css`, and navigation dispatch/routing in `app.js` | none | PLANNED |
-| M2 | Document Security Suite | Implement Sign PDF, Unlock PDF, and Protect PDF in `pdf_core.js`, with UI controls/modals in `app.js`, `index.html`, and `style.css` | M1 | PLANNED |
-| M3 | Document Editing & Forms Suite | Implement Crop PDF, PDF Forms (inspect/fill/flatten), Remove Pages, and Extract Pages in `pdf_core.js` and `app.js` | M1 | PLANNED |
-| M4 | Final Milestone: Full Verification & Adversarial Hardening | Phase 1: 100% pass of `test/test_phase1.js` (Tiers 1-4) and `test/test_core.js`. Phase 2: Adversarial hardening (Tier 5) with challenger and clean forensic audit. | M2, M3, E2E | PLANNED |
+| M1 | Mega-Menu Header & Modular Navigation | Semantic mega-menu in `index.html`, responsive CSS in `style.css`, and navigation dispatch/routing in `app.js` | none | COMPLETED |
+| M2 | Document Security Suite | Implement Sign PDF, Unlock PDF, and Protect PDF in `pdf_core.js`, with UI controls/modals in `app.js`, `index.html`, and `style.css` | M1 | COMPLETED |
+| M3 | Document Editing & Forms Suite | Implement Crop PDF, PDF Forms (inspect/fill/flatten), Remove Pages, and Extract Pages in `pdf_core.js` and `app.js` | M1 | COMPLETED |
+| M4 | Optimization & Analysis Suite (Phase 2) | Compress PDF, Repair damaged PDFs, Redact sensitive data, and Compare PDF versions | M2, M3 | COMPLETED |
+| M5 | Conversions & Device Integration (Phase 3)| Live Camera Scanner (Scan to PDF), Text to PDF, and PDF to Markdown/Text extraction | M4 | COMPLETED |
+| M6 | Full Verification & Adversarial Hardening | Comprehensive test coverage across all suites (135+ tests: unit, adversarial, stress, challenger) | M1-M5 | COMPLETED |
 
 ## E2E Testing Track (Parallel)
 - **Track**: E2E Testing Track Orchestrator / Test Writer

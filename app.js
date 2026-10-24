@@ -1623,6 +1623,47 @@ document.addEventListener('DOMContentLoaded', () => {
           ${uploadedFiles.length < 2 ? '<p class="setting-hint" style="color: var(--accent); margin-top: 0.5rem;">Click "+ Add More Files" above to upload Document B.</p>' : ''}
         </div>
       `;
+    } else if (currentTool === 'text-to-pdf' || currentTool === 'txt-to-pdf') {
+      toolSettings.innerHTML = `
+        <div class="setting-group">
+          <label for="textToPdfFontSize">Font Size</label>
+          <select id="textToPdfFontSize">
+            <option value="10">Small (10 pt)</option>
+            <option value="12" selected>Standard (12 pt)</option>
+            <option value="14">Medium (14 pt)</option>
+            <option value="16">Large (16 pt)</option>
+          </select>
+        </div>
+        <div class="setting-group">
+          <label for="textToPdfMargin">Page Margins</label>
+          <select id="textToPdfMargin">
+            <option value="30">Narrow (30 pt)</option>
+            <option value="50" selected>Standard (50 pt)</option>
+            <option value="70">Wide (70 pt)</option>
+          </select>
+        </div>
+        <div class="setting-group">
+          <label for="textToPdfDirectInput">Text Content / Notes</label>
+          <textarea id="textToPdfDirectInput" rows="6" style="width:100%; border:1px solid var(--border); border-radius:6px; padding:0.5rem; font-family:monospace; font-size:0.85rem;" placeholder="Type, paste text or notes here, or upload a .txt/.md file above..."></textarea>
+          <span class="setting-hint">Word-wraps and paginates into clean A4 PDF pages.</span>
+        </div>
+      `;
+    } else if (currentTool === 'pdf-to-text' || currentTool === 'pdf-to-txt') {
+      toolSettings.innerHTML = `
+        <div class="setting-group">
+          <label for="pdfToTextFormat">Extraction Format</label>
+          <select id="pdfToTextFormat">
+            <option value="markdown" selected>Markdown (.md) with page headings</option>
+            <option value="plain">Plain Text (.txt)</option>
+          </select>
+        </div>
+        <div class="setting-group">
+          <label>Extraction Info</label>
+          <div style="background: var(--bg-surface); padding: 0.75rem; border-radius: 6px; border: 1px solid var(--border); font-size: 0.85rem; line-height: 1.5;">
+            Extracts textual content, baseline paragraph groupings, and document headings directly in-memory using PDF.js.
+          </div>
+        </div>
+      `;
     } else if (currentTool === 'remove-pages') {
       const sorted = Array.from(selectedRemovePages).sort((a, b) => a - b);
       toolSettings.innerHTML = `
@@ -2617,3 +2658,147 @@ document.addEventListener('DOMContentLoaded', () => {
   // Initialize signature modal
   initSignatureModal();
 });
+
+
+  // ============================================================================
+  // Phase 3: Live Camera Scanner Subsystem
+  // ============================================================================
+  let scanMediaStream = null;
+  let scanFacingMode = 'environment';
+  const scannedPages = [];
+
+  function openCameraScanner() {
+    const modalContainer = document.getElementById('modalContainer');
+    const scanModal = document.getElementById('scanModal');
+    if (!modalContainer || !scanModal) return;
+
+    modalContainer.style.display = 'flex';
+    modalContainer.setAttribute('aria-hidden', 'false');
+    scanModal.style.display = 'block';
+
+    startCameraStream();
+    setupScanModalButtons();
+  }
+
+  async function startCameraStream() {
+    const video = document.getElementById('scanVideo');
+    if (!video) return;
+
+    if (scanMediaStream) {
+      scanMediaStream.getTracks().forEach((t) => t.stop());
+    }
+
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        scanMediaStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: scanFacingMode, width: { ideal: 1920 }, height: { ideal: 1080 } },
+          audio: false,
+        });
+        video.srcObject = scanMediaStream;
+      } else {
+        throw new Error('Camera access not supported on this browser or origin.');
+      }
+    } catch (err) {
+      console.warn('Camera stream error:', err);
+      showStatus('Camera access unavailable. Using photo upload fallback.', 'error');
+    }
+  }
+
+  function setupScanModalButtons() {
+    const captureBtn = document.getElementById('scanCaptureBtn');
+    const switchBtn = document.getElementById('scanSwitchCameraBtn');
+    const finishBtn = document.getElementById('scanFinishBtn');
+    const cancelBtn = document.getElementById('scanCancelBtn');
+    const video = document.getElementById('scanVideo');
+    const canvas = document.getElementById('scanCaptureCanvas');
+
+    if (captureBtn) {
+      captureBtn.onclick = () => {
+        if (!video || !canvas) return;
+        const w = video.videoWidth || 640;
+        const h = video.videoHeight || 480;
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, w, h);
+
+        canvas.toBlob((blob) => {
+          if (!blob) return;
+          const url = URL.createObjectURL(blob);
+          blob.arrayBuffer().then((buf) => {
+            scannedPages.push({ bytes: new Uint8Array(buf), type: 'jpeg', url });
+            renderScannedTray();
+          });
+        }, 'image/jpeg', 0.9);
+      };
+    }
+
+    if (switchBtn) {
+      switchBtn.onclick = () => {
+        scanFacingMode = scanFacingMode === 'environment' ? 'user' : 'environment';
+        startCameraStream();
+      };
+    }
+
+    if (finishBtn) {
+      finishBtn.onclick = async () => {
+        if (scannedPages.length === 0) return;
+        try {
+          showStatus('Assembling scanned pages into PDF...', 'processing');
+          const pdfBytes = await PDFCore.imagesToPDF(scannedPages, { margin: 10, pageSize: 'a4' });
+          downloadFile(pdfBytes, 'scanned_document.pdf', 'application/pdf');
+          closeScanModal();
+          showSuccess(`Successfully scanned and compiled ${scannedPages.length} page(s) into PDF!`);
+        } catch (err) {
+          showStatus(err.message, 'error');
+        }
+      };
+    }
+
+    if (cancelBtn) {
+      cancelBtn.onclick = closeScanModal;
+    }
+  }
+
+  function renderScannedTray() {
+    const tray = document.getElementById('scanPagesTray');
+    const finishBtn = document.getElementById('scanFinishBtn');
+    if (!tray || !finishBtn) return;
+
+    tray.innerHTML = '';
+    if (scannedPages.length === 0) {
+      tray.innerHTML = '<p id="scanEmptyTrayNotice" style="margin: auto; color: var(--text-muted); font-size: 0.85rem;">Captured pages will appear here</p>';
+      finishBtn.disabled = true;
+      finishBtn.textContent = 'Assemble PDF (0 pages)';
+      return;
+    }
+
+    scannedPages.forEach((p, idx) => {
+      const item = document.createElement('div');
+      item.style.cssText = 'position: relative; width: 60px; height: 75px; flex-shrink: 0; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; background: #000;';
+      item.innerHTML = `
+        <img src="${p.url}" style="width: 100%; height: 100%; object-fit: cover;" alt="Scan ${idx + 1}">
+        <span style="position: absolute; bottom: 2px; right: 2px; background: rgba(0,0,0,0.7); color: #fff; font-size: 9px; padding: 1px 3px; border-radius: 2px;">${idx + 1}</span>
+        <button type="button" style="position: absolute; top: 2px; right: 2px; background: red; color: #fff; border: none; border-radius: 50%; width: 16px; height: 16px; font-size: 9px; cursor: pointer;" title="Delete">✕</button>
+      `;
+      item.querySelector('button').onclick = () => {
+        scannedPages.splice(idx, 1);
+        renderScannedTray();
+      };
+      tray.appendChild(item);
+    });
+
+    finishBtn.disabled = false;
+    finishBtn.textContent = `Assemble PDF (${scannedPages.length} ${scannedPages.length === 1 ? 'page' : 'pages'})`;
+  }
+
+  function closeScanModal() {
+    if (scanMediaStream) {
+      scanMediaStream.getTracks().forEach((t) => t.stop());
+      scanMediaStream = null;
+    }
+    const modalContainer = document.getElementById('modalContainer');
+    const scanModal = document.getElementById('scanModal');
+    if (modalContainer) modalContainer.style.display = 'none';
+    if (scanModal) scanModal.style.display = 'none';
+  }
