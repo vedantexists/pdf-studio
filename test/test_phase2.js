@@ -114,6 +114,56 @@ async function runPhase2Tests() {
     console.log('  ✓ Chained in-memory pipeline (redact -> repair -> compress) passed cleanly');
   }
 
+  // 5. comparePDF tests
+  console.log('\n--- 5. Compare PDF ---');
+  {
+    const docA = await createSampleDoc(2, 'Original Document');
+    const docIdentical = await createSampleDoc(2, 'Original Document');
+    const docModified = await createSampleDoc(2, 'Modified Revision V2');
+
+    // Case A: Identical documents return 0 diffPixels and 0% diff
+    const sameResult = await PDFCore.comparePDF(docA, docIdentical);
+    assert(sameResult && Array.isArray(sameResult.diffPages), 'comparePDF must return diffPages array');
+    assert.strictEqual(sameResult.diffPages.length, 2, 'Must compare all 2 pages');
+    assert.strictEqual(sameResult.totalDiffPixels, 0, 'Identical documents must have 0 totalDiffPixels');
+    assert.strictEqual(sameResult.hasDifferences, false, 'Identical documents must have hasDifferences=false');
+    assert.strictEqual(sameResult.diffPages[0].diffPixels, 0, 'Page 0 must have 0 diffPixels');
+    assert.strictEqual(sameResult.diffPages[0].diffPercent, 0, 'Page 0 must have 0% diff');
+    console.log('  ✓ Identical PDFs return 0 diffPixels and 0% discrepancy');
+
+    // Case B: Differing documents detect discrepancies
+    const diffResult = await PDFCore.comparePDF(docA, docModified);
+    assert(diffResult && Array.isArray(diffResult.diffPages), 'comparePDF must return diffPages array');
+    assert(diffResult.totalDiffPixels > 0, 'Differing documents must have positive totalDiffPixels');
+    assert.strictEqual(diffResult.hasDifferences, true, 'Differing documents must have hasDifferences=true');
+    assert(diffResult.diffPages[0].diffPixels > 0, 'Page 0 diffPixels must be positive');
+    assert(diffResult.diffPages[0].diffPercent > 0, 'Page 0 diffPercent must be positive');
+    console.log(`  ✓ Differing PDFs detect differences (Page 0: ${diffResult.diffPages[0].diffPixels} diffPixels, ${diffResult.diffPages[0].diffPercent}% diff)`);
+
+    // Case C: Asymmetric page counts (Doc A has 1 page, Doc B has 2 pages)
+    const doc1Page = await createSampleDoc(1, 'One Page Only');
+    const doc2Page = await createSampleDoc(2, 'Two Pages Document');
+    const asymResult = await PDFCore.comparePDF(doc1Page, doc2Page);
+    assert.strictEqual(asymResult.diffPages.length, 2, 'Must compare up to max page count');
+    assert.strictEqual(asymResult.diffPages[1].diffPercent, 100, 'Missing page in Doc A must report 100% diff');
+    assert(asymResult.diffPages[1].diffPixels > 0, 'Missing page must have positive diffPixels');
+    console.log('  ✓ Asymmetric document lengths detect added/missing pages with 100% diff');
+
+    // Case D: compressPDF preset validation (extreme, recommended, less)
+    for (const preset of ['extreme', 'recommended', 'less']) {
+      const compPreset = await PDFCore.compressPDF(doc2Page, { level: preset });
+      assert(compPreset instanceof Uint8Array, `compressPDF preset '${preset}' must return Uint8Array`);
+      const verifiedDoc = await PDFDocument.load(compPreset);
+      assert.strictEqual(verifiedDoc.getPageCount(), 2, `compressPDF preset '${preset}' must preserve page count`);
+    }
+    console.log('  ✓ compressPDF presets (extreme, recommended, less) execute cleanly');
+
+    // Case E: Null & boundary guards
+    await assert.rejects(() => PDFCore.comparePDF(null, docA), /required/i);
+    await assert.rejects(() => PDFCore.comparePDF(docA, null), /required/i);
+    console.log('  ✓ comparePDF null guards passed cleanly');
+  }
+
   console.log('\n=============================================');
   console.log('All Phase 2 Tests Passed 100%!');
   console.log('=============================================\n');

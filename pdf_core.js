@@ -870,14 +870,20 @@
 
   
   /**
-   * Compress PDF document using object stream compaction, stream deflation, and optional metadata stripping.
+   * Compress PDF document using object stream compaction, stream deflation, image downsampling, and optional metadata stripping.
+   * Supports presets: 'extreme' (72 DPI, q0.5), 'recommended' (150 DPI, q0.7), 'less' (200 DPI, q0.85).
    * @param {Uint8Array|ArrayBuffer} pdfBytes
-   * @param {Object} [options={}] - { level: 'extreme'|'recommended'|'less', stripMetadata: boolean }
+   * @param {Object} [options={}] - { level: 'extreme'|'recommended'|'less', preset?: string, dpi?: number, quality?: number, stripMetadata?: boolean }
    * @returns {Promise<Uint8Array>}
    */
   async function compressPDF(pdfBytes, options = {}) {
     if (!pdfBytes) throw new Error('PDF bytes are required to compress.');
     const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+
+    const level = options.level || options.preset || 'recommended';
+    const dpi = options.dpi || (level === 'extreme' ? 72 : (level === 'less' ? 200 : 150));
+    const quality = options.quality !== undefined ? options.quality : (level === 'extreme' ? 0.5 : (level === 'less' ? 0.85 : 0.7));
+    const maxDim = level === 'extreme' ? 800 : (level === 'less' ? 1800 : 1200);
 
     if (options.stripMetadata) {
       doc.setTitle('');
@@ -910,14 +916,15 @@
                     : rawContents;
                   
                   const channels = decompressed.length >= width * height * 4 ? 4 : (decompressed.length >= width * height * 3 ? 3 : 1);
-                  const newW = Math.floor(width / 2);
-                  const newH = Math.floor(height / 2);
+                  const scaleDiv = level === 'extreme' ? 3 : 2;
+                  const newW = Math.max(1, Math.floor(width / scaleDiv));
+                  const newH = Math.max(1, Math.floor(height / scaleDiv));
                   const newBuffer = Buffer.alloc(newW * newH * channels);
 
                   for (let ny = 0; ny < newH; ny++) {
-                    const sy = ny * 2;
+                    const sy = Math.min(height - 1, ny * scaleDiv);
                     for (let nx = 0; nx < newW; nx++) {
-                      const sx = nx * 2;
+                      const sx = Math.min(width - 1, nx * scaleDiv);
                       const sIdx = (sy * width + sx) * channels;
                       const dIdx = (ny * newW + nx) * channels;
                       for (let c = 0; c < channels; c++) {
@@ -927,16 +934,112 @@
                   }
 
                   const recompressed = zlibMod.deflateSync(newBuffer, { level: 9 });
-                  dict.set(PDFName.of('Width'), doc.context.obj(newW));
-                  dict.set(PDFName.of('Height'), doc.context.obj(newH));
-                  dict.set(PDFName.of('Filter'), PDFName.of('FlateDecode'));
-                  dict.set(PDFName.of('Length'), doc.context.obj(recompressed.length));
-                  const newStream = PDFLib.PDFRawStream.of(dict, recompressed);
-                  doc.context.assign(ref, newStream);
+                  if (recompressed.length < rawContents.length) {
+                    dict.set(PDFName.of('Width'), doc.context.obj(newW));
+                    dict.set(PDFName.of('Height'), doc.context.obj(newH));
+                    dict.set(PDFName.of('Filter'), PDFName.of('FlateDecode'));
+                    dict.set(PDFName.of('Length'), doc.context.obj(recompressed.length));
+                    const newStream = PDFLib.PDFRawStream.of(dict, recompressed);
+                    doc.context.assign(ref, newStream);
+                  }
                 } catch (e) {
                   // Fall back to original stream if downsampling is skipped
                 }
               }
+            }
+          }
+        }
+      }
+    } else if (typeof OffscreenCanvas !== 'undefined' || (typeof document !== 'undefined' && document.createElement)) {
+      // In-browser downsampling via OffscreenCanvas / HTML5 Canvas with JPEG re-encoding
+      for (const [ref, obj] of doc.context.enumerateIndirectObjects()) {
+        if (obj instanceof PDFLib.PDFRawStream) {
+          const dict = obj.dict;
+          const subtype = dict.get(PDFName.of('Subtype'));
+          if (subtype && subtype.toString() === '/Image') {
+            const wObj = dict.get(PDFName.of('Width'));
+            const hObj = dict.get(PDFName.of('Height'));
+            const filter = dict.get(PDFName.of('Filter'));
+            const rawContents = obj.getContents();
+            if (!rawContents || rawContents.length === 0) continue;
+
+            const isJpeg = filter && filter.toString().includes('DCTDecode');
+            try {
+              let bitmap = null;
+              if (isJpeg && typeof createImageBitmap === 'function') {
+                const blob = new Blob([rawContents], { type: 'image/jpeg' });
+                bitmap = await createImageBitmap(blob);
+              } else if (decodePDFRawStream && typeof OffscreenCanvas !== 'undefined') {
+                const width = (wObj && typeof wObj.asNumber === 'function') ? wObj.asNumber() : 0;
+                const height = (hObj && typeof hObj.asNumber === 'function') ? hObj.asNumber() : 0;
+                if (width > 0 && height > 0) {
+                  const decompressed = decodePDFRawStream(obj).decode();
+                  const channels = decompressed.length >= width * height * 4 ? 4 : (decompressed.length >= width * height * 3 ? 3 : 1);
+                  const srcCanvas = new OffscreenCanvas(width, height);
+                  const srcCtx = srcCanvas.getContext('2d');
+                  const imgData = srcCtx.createImageData(width, height);
+                  for (let i = 0; i < width * height; i++) {
+                    const sIdx = i * channels;
+                    const dIdx = i * 4;
+                    if (channels === 4) {
+                      imgData.data[dIdx] = decompressed[sIdx];
+                      imgData.data[dIdx + 1] = decompressed[sIdx + 1];
+                      imgData.data[dIdx + 2] = decompressed[sIdx + 2];
+                      imgData.data[dIdx + 3] = decompressed[sIdx + 3];
+                    } else if (channels === 3) {
+                      imgData.data[dIdx] = decompressed[sIdx];
+                      imgData.data[dIdx + 1] = decompressed[sIdx + 1];
+                      imgData.data[dIdx + 2] = decompressed[sIdx + 2];
+                      imgData.data[dIdx + 3] = 255;
+                    } else {
+                      const v = decompressed[sIdx];
+                      imgData.data[dIdx] = v;
+                      imgData.data[dIdx + 1] = v;
+                      imgData.data[dIdx + 2] = v;
+                      imgData.data[dIdx + 3] = 255;
+                    }
+                  }
+                  srcCtx.putImageData(imgData, 0, 0);
+                  bitmap = srcCanvas;
+                }
+              }
+
+              if (bitmap) {
+                const bw = bitmap.width;
+                const bh = bitmap.height;
+                const scale = Math.min(1.0, maxDim / Math.max(bw, bh));
+                const targetW = Math.max(1, Math.round(bw * scale));
+                const targetH = Math.max(1, Math.round(bh * scale));
+
+                const canvas = typeof OffscreenCanvas !== 'undefined'
+                  ? new OffscreenCanvas(targetW, targetH)
+                  : document.createElement('canvas');
+                canvas.width = targetW;
+                canvas.height = targetH;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(bitmap, 0, 0, targetW, targetH);
+
+                let downsampledBytes = null;
+                if (typeof canvas.convertToBlob === 'function') {
+                  const outBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality });
+                  downsampledBytes = new Uint8Array(await outBlob.arrayBuffer());
+                } else if (typeof canvas.toDataURL === 'function') {
+                  const dataUrl = canvas.toDataURL('image/jpeg', quality);
+                  const base64 = dataUrl.split(',')[1];
+                  const bin = atob(base64);
+                  downsampledBytes = new Uint8Array(bin.length);
+                  for (let i = 0; i < bin.length; i++) downsampledBytes[i] = bin.charCodeAt(i);
+                }
+
+                if (downsampledBytes && downsampledBytes.length < rawContents.length) {
+                  const newImg = await doc.embedJpg(downsampledBytes);
+                  await newImg.embed();
+                  const newStream = doc.context.lookup(newImg.ref);
+                  doc.context.assign(ref, newStream);
+                }
+              }
+            } catch (err) {
+              // Gracefully continue with original stream if downsampling fails
             }
           }
         }
@@ -1674,6 +1777,287 @@
     return matches.join(' ');
   }
 
+  /**
+   * Compare two PDF documents page-by-page.
+   * Extracts text, renders discrepancy diffs with Cyan (#00e5ff) and Magenta (#ff007f) highlights,
+   * calculates diffPixels and diffPercent, and guarantees proper lifecycle cleanup (.destroy()).
+   * @param {Uint8Array|ArrayBuffer} pdfBytesA - Original document
+   * @param {Uint8Array|ArrayBuffer} pdfBytesB - Modified document
+   * @param {Object} [options={}] - { scale: number }
+   * @returns {Promise<{ diffPages: Array<{ pageIndex: number, diffPixels: number, diffPercent: number, canvasDataUrl?: string }>, totalDiffPixels: number, hasDifferences: boolean }>}
+   */
+  async function comparePDF(pdfBytesA, pdfBytesB, options = {}) {
+    if (!pdfBytesA || !pdfBytesB) {
+      throw new Error('Both PDF documents (A and B) are required for comparison.');
+    }
+
+    const bytesA = pdfBytesA instanceof Uint8Array ? pdfBytesA.slice() : new Uint8Array(pdfBytesA);
+    const bytesB = pdfBytesB instanceof Uint8Array ? pdfBytesB.slice() : new Uint8Array(pdfBytesB);
+
+    let pdfjs = null;
+    if (typeof window !== 'undefined' && window.pdfjsLib) {
+      pdfjs = window.pdfjsLib;
+    } else if (typeof require !== 'undefined') {
+      try {
+        pdfjs = require('pdfjs-dist/legacy/build/pdf.js');
+      } catch (e) {
+        try { pdfjs = require('pdfjs-dist'); } catch (e2) {}
+      }
+    }
+
+    let docA = null;
+    let docB = null;
+
+    try {
+      let numPagesA = 0;
+      let numPagesB = 0;
+
+      if (pdfjs && typeof pdfjs.getDocument === 'function') {
+        try {
+          const taskA = pdfjs.getDocument({ data: bytesA.slice() });
+          docA = await taskA.promise;
+          numPagesA = docA.numPages;
+        } catch (e) {}
+        try {
+          const taskB = pdfjs.getDocument({ data: bytesB.slice() });
+          docB = await taskB.promise;
+          numPagesB = docB.numPages;
+        } catch (e) {}
+      }
+
+      let pdfLibDocA = null;
+      let pdfLibDocB = null;
+      try {
+        pdfLibDocA = await PDFDocument.load(bytesA, { ignoreEncryption: true });
+        if (!numPagesA) numPagesA = pdfLibDocA.getPageCount();
+      } catch (e) {}
+      try {
+        pdfLibDocB = await PDFDocument.load(bytesB, { ignoreEncryption: true });
+        if (!numPagesB) numPagesB = pdfLibDocB.getPageCount();
+      } catch (e) {}
+
+      const maxPages = Math.max(numPagesA, numPagesB);
+      const diffPages = [];
+      const hasCanvas = (typeof document !== 'undefined' && typeof document.createElement === 'function') || typeof OffscreenCanvas !== 'undefined';
+
+      for (let pageIdx = 0; pageIdx < maxPages; pageIdx++) {
+        const pageNumber = pageIdx + 1;
+        const existsInA = pageNumber <= numPagesA;
+        const existsInB = pageNumber <= numPagesB;
+
+        let diffPixels = 0;
+        let diffPercent = 0;
+        let canvasDataUrl = undefined;
+
+        if (existsInA && !existsInB) {
+          // Page deleted in B
+          let totalPx = 500000;
+          if (docA) {
+            try {
+              const pA = await docA.getPage(pageNumber);
+              const vp = pA.getViewport({ scale: options.scale || 1.0 });
+              totalPx = Math.round(vp.width * vp.height);
+            } catch (e) {}
+          }
+          diffPixels = totalPx;
+          diffPercent = 100.0;
+        } else if (!existsInA && existsInB) {
+          // Page added in B
+          let totalPx = 500000;
+          if (docB) {
+            try {
+              const pB = await docB.getPage(pageNumber);
+              const vp = pB.getViewport({ scale: options.scale || 1.0 });
+              totalPx = Math.round(vp.width * vp.height);
+            } catch (e) {}
+          }
+          diffPixels = totalPx;
+          diffPercent = 100.0;
+        } else {
+          // Exists in both documents
+          let canvasDiffDone = false;
+          if (hasCanvas && docA && docB) {
+            try {
+              const pA = await docA.getPage(pageNumber);
+              const pB = await docB.getPage(pageNumber);
+              const scale = options.scale || 1.0;
+              const vpA = pA.getViewport({ scale });
+              const vpB = pB.getViewport({ scale });
+
+              const createC = (w, h) => {
+                if (typeof OffscreenCanvas !== 'undefined') return new OffscreenCanvas(w, h);
+                const c = document.createElement('canvas');
+                c.width = w; c.height = h;
+                return c;
+              };
+
+              const canvasA = createC(Math.round(vpA.width), Math.round(vpA.height));
+              const canvasB = createC(Math.round(vpB.width), Math.round(vpB.height));
+
+              await pA.render({ canvasContext: canvasA.getContext('2d'), viewport: vpA }).promise;
+              await pB.render({ canvasContext: canvasB.getContext('2d'), viewport: vpB }).promise;
+
+              const w = Math.max(canvasA.width, canvasB.width);
+              const h = Math.max(canvasA.height, canvasB.height);
+              const diffCanvas = createC(w, h);
+              const diffCtx = diffCanvas.getContext('2d');
+              const imgA = canvasA.getContext('2d').getImageData(0, 0, canvasA.width, canvasA.height);
+              const imgB = canvasB.getContext('2d').getImageData(0, 0, canvasB.width, canvasB.height);
+              const diffImg = diffCtx.createImageData(w, h);
+              const totalPx = w * h;
+
+              for (let y = 0; y < h; y++) {
+                for (let x = 0; x < w; x++) {
+                  const i = (y * w + x) * 4;
+                  const inA = x < canvasA.width && y < canvasA.height;
+                  const inB = x < canvasB.width && y < canvasB.height;
+                  const iA = inA ? (y * canvasA.width + x) * 4 : -1;
+                  const iB = inB ? (y * canvasB.width + x) * 4 : -1;
+
+                  const rA = inA ? imgA.data[iA] : 255;
+                  const gA = inA ? imgA.data[iA + 1] : 255;
+                  const bA = inA ? imgA.data[iA + 2] : 255;
+
+                  const rB = inB ? imgB.data[iB] : 255;
+                  const gB = inB ? imgB.data[iB + 1] : 255;
+                  const bB = inB ? imgB.data[iB + 2] : 255;
+
+                  const dr = Math.abs(rA - rB);
+                  const dg = Math.abs(gA - gB);
+                  const db = Math.abs(bA - bB);
+
+                  if (dr + dg + db > 30) {
+                    diffPixels++;
+                    const lumA = rA + gA + bA;
+                    const lumB = rB + gB + bB;
+                    if (lumA < lumB) {
+                      // Removed in B -> Cyan (#00e5ff)
+                      diffImg.data[i] = 0;
+                      diffImg.data[i + 1] = 229;
+                      diffImg.data[i + 2] = 255;
+                      diffImg.data[i + 3] = 255;
+                    } else {
+                      // Added in B -> Magenta (#ff007f)
+                      diffImg.data[i] = 255;
+                      diffImg.data[i + 1] = 0;
+                      diffImg.data[i + 2] = 127;
+                      diffImg.data[i + 3] = 255;
+                    }
+                  } else {
+                    const gray = Math.round((rA + gA + bA) / 3);
+                    diffImg.data[i] = gray;
+                    diffImg.data[i + 1] = gray;
+                    diffImg.data[i + 2] = gray;
+                    diffImg.data[i + 3] = 40;
+                  }
+                }
+              }
+              diffCtx.putImageData(diffImg, 0, 0);
+              if (typeof diffCanvas.toDataURL === 'function') {
+                canvasDataUrl = diffCanvas.toDataURL('image/png');
+              }
+              diffPercent = totalPx > 0 ? Number(((diffPixels / totalPx) * 100).toFixed(2)) : 0;
+              canvasDiffDone = true;
+            } catch (err) {
+              // Fall back to text/structural comparison
+            }
+          }
+
+          if (!canvasDiffDone) {
+            // Textual & structural comparison fallback
+            let textA = '';
+            let textB = '';
+            let totalPx = 500000;
+
+            if (docA && docB) {
+              try {
+                const pA = await docA.getPage(pageNumber);
+                const pB = await docB.getPage(pageNumber);
+                const tcA = await pA.getTextContent();
+                const tcB = await pB.getTextContent();
+                textA = tcA.items.map(it => it.str).join(' ');
+                textB = tcB.items.map(it => it.str).join(' ');
+                const vpA = pA.getViewport({ scale: 1.0 });
+                totalPx = Math.round(vpA.width * vpA.height);
+              } catch (e) {}
+            }
+
+            let streamEqual = true;
+            if (pdfLibDocA && pdfLibDocB) {
+              try {
+                const sA = pdfLibDocA.getPage(pageIdx).node.Contents();
+                const sB = pdfLibDocB.getPage(pageIdx).node.Contents();
+                streamEqual = (String(sA) === String(sB));
+              } catch (e) {}
+            }
+
+            if (textA === textB && streamEqual) {
+              diffPixels = 0;
+              diffPercent = 0.0;
+            } else if (textA === textB && !streamEqual) {
+              diffPercent = 2.0;
+              diffPixels = Math.round(totalPx * 0.02);
+            } else {
+              // Calculate text difference ratio
+              const maxLen = Math.max(textA.length, textB.length, 1);
+              let diffChars = 0;
+              if (maxLen <= 1000) {
+                // Levenshtein distance
+                const s1 = textA;
+                const s2 = textB;
+                let prev = Array.from({ length: s2.length + 1 }, (_, i) => i);
+                for (let i = 1; i <= s1.length; i++) {
+                  const curr = [i];
+                  for (let j = 1; j <= s2.length; j++) {
+                    const cost = s1[i - 1] === s2[j - 1] ? 0 : 1;
+                    curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+                  }
+                  prev = curr;
+                }
+                diffChars = prev[s2.length];
+              } else {
+                const w1 = textA.split(/\s+/);
+                const w2 = textB.split(/\s+/);
+                const set1 = new Set(w1);
+                const set2 = new Set(w2);
+                let diffW = 0;
+                for (const w of set1) if (!set2.has(w)) diffW++;
+                for (const w of set2) if (!set1.has(w)) diffW++;
+                diffChars = Math.round((diffW / Math.max(w1.length, w2.length, 1)) * maxLen);
+              }
+              const ratio = Math.min(1.0, Math.max(0.01, diffChars / maxLen));
+              diffPercent = Number((ratio * 100).toFixed(2));
+              diffPixels = Math.max(1, Math.round(totalPx * ratio));
+            }
+          }
+        }
+
+        diffPages.push({
+          pageIndex: pageIdx,
+          diffPixels,
+          diffPercent,
+          ...(canvasDataUrl ? { canvasDataUrl } : {}),
+        });
+      }
+
+      const totalDiffPixels = diffPages.reduce((acc, p) => acc + p.diffPixels, 0);
+      const hasDifferences = totalDiffPixels > 0;
+
+      return {
+        diffPages,
+        totalDiffPixels,
+        hasDifferences,
+      };
+    } finally {
+      if (docA && typeof docA.destroy === 'function') {
+        try { await docA.destroy(); } catch (e) {}
+      }
+      if (docB && typeof docB.destroy === 'function') {
+        try { await docB.destroy(); } catch (e) {}
+      }
+    }
+  }
+
   return {
     mergePDFs,
     splitPDF,
@@ -1697,5 +2081,6 @@
     redactPDF,
     textToPDF,
     pdfToText,
+    comparePDF,
   };
 });
