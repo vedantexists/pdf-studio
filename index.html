@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDFTool - Fast, Private Client-Side PDF Tools (iLovePDF Clone)</title>
+  <meta name="description" content="Merge, split, organize, rotate, convert, and watermark PDFs directly in your browser. 100% private, files never leave your device.">
+  <link rel="stylesheet" href="style.css">
+  
+  <!-- Client-side PDF & Zip dependencies (Local first, CDN fallback) -->
+  <script src="node_modules/pdf-lib/dist/pdf-lib.min.js" onerror="this.onerror=null;this.src='https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js'"></script>
+  <script src="node_modules/jszip/dist/jszip.min.js" onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js'"></script>
+  <script src="node_modules/pdfjs-dist/build/pdf.min.js" onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'"></script>
+  <script>
+    window.addEventListener('DOMContentLoaded', () => {
+      if (window.pdfjsLib && !window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = window.location.protocol.startsWith('http')
+          ? 'node_modules/pdfjs-dist/build/pdf.worker.min.js'
+          : 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      }
+    });
+  </script>
+</head>
+<body>
+  <!-- Header -->
+  <header class="app-header">
+    <div class="header-container">
+      <div class="logo" id="homeLogoBtn" tabindex="0" role="button" aria-label="PDFTool Home">
+        <span class="logo-heart">❤️</span>
+        <span>PDF<span style="color: var(--primary);">Tool</span></span>
+        <span class="logo-badge">Local</span>
+      </div>
+      <div class="privacy-pill" title="Processing happens 100% locally in your browser memory">
+        <span>🔒</span>
+        <span>100% In-Browser Privacy</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- Home / Dashboard View -->
+    <div id="dashboardView">
+      <section class="hero">
+        <h1>Every tool you need to work with PDFs in one place</h1>
+        <p>100% client-side. Your files never leave your device. Merge, split, organize, rotate, convert, and watermark PDFs in seconds.</p>
+      </section>
+
+      <section class="tools-grid" aria-label="PDF Tools">
+        <!-- Merge -->
+        <div class="tool-card" tabindex="0" role="button" data-tool="merge" aria-label="Merge PDF tool">
+          <div class="tool-icon">⤯</div>
+          <h2>Merge PDF</h2>
+          <p>Combine multiple PDFs into one unified document in any order you choose.</p>
+        </div>
+
+        <!-- Split -->
+        <div class="tool-card" tabindex="0" role="button" data-tool="split" aria-label="Split PDF tool">
+          <div class="tool-icon">✂</div>
+          <h2>Split PDF</h2>
+          <p>Separate one page, custom ranges, or extract all pages into individual files.</p>
+        </div>
+
+        <!-- Organize -->
+        <div class="tool-card" tabindex="0" role="button" data-tool="organize" aria-label="Organize PDF tool">
+          <div class="tool-icon">☷</div>
+          <h2>Organize PDF</h2>
+          <p>Sort, delete, and rotate pages visually with an interactive page thumbnail grid.</p>
+        </div>
+
+        <!-- Rotate -->
+        <div class="tool-card" tabindex="0" role="button" data-tool="rotate" aria-label="Rotate PDF tool">
+          <div class="tool-icon">↻</div>
+          <h2>Rotate PDF</h2>
+          <p>Rotate your PDF pages 90°, 180°, or 270° clockwise or counter-clockwise.</p>
+        </div>
+
+        <!-- PDF to JPG / PNG -->
+        <div class="tool-card" tabindex="0" role="button" data-tool="pdf-to-img" aria-label="PDF to Images tool">
+          <div class="tool-icon">🖼</div>
+          <h2>PDF to JPG / PNG</h2>
+          <p>Convert each page of a PDF into high-quality images and download them or get a ZIP.</p>
+        </div>
+
+        <!-- Images to PDF -->
+        <div class="tool-card" tabindex="0" role="button" data-tool="img-to-pdf" aria-label="Images to PDF tool">
+          <div class="tool-icon">📄</div>
+          <h2>JPG / PNG to PDF</h2>
+          <p>Convert images to PDF in seconds. Easily adjust orientation and margins.</p>
+        </div>
+
+        <!-- Watermark -->
+        <div class="tool-card" tabindex="0" role="button" data-tool="watermark" aria-label="Watermark PDF tool">
+          <div class="tool-icon">✎</div>
+          <h2>Watermark PDF</h2>
+          <p>Stamp custom text over your PDF. Choose typography, transparency, angle and color.</p>
+        </div>
+
+        <!-- Page Numbers -->
+        <div class="tool-card" tabindex="0" role="button" data-tool="page-numbers" aria-label="Page Numbers tool">
+          <div class="tool-icon">🔢</div>
+          <h2>Page Numbers</h2>
+          <p>Add sequential page numbers to all pages with customizable positioning.</p>
+        </div>
+      </section>
+    </div>
+
+    <!-- Active Tool Workspace View -->
+    <div id="workspaceView" class="workspace-view" aria-live="polite">
+      <div class="workspace-header">
+        <button id="backBtn" class="back-btn" type="button">
+          <span>←</span> Back to All Tools
+        </button>
+        <div class="active-tool-title">
+          <span id="activeToolIcon" class="tool-icon" style="width: 36px; height: 36px; font-size: 1.2rem; margin-bottom: 0;"></span>
+          <h2 id="activeToolTitle">Tool Name</h2>
+        </div>
+      </div>
+
+      <!-- Dropzone (shown initially when no file is chosen or to add more) -->
+      <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Drag and drop or select files">
+        <div class="dropzone-icon">☁</div>
+        <h3 id="dropzoneHeading">Select PDF files</h3>
+        <p id="dropzoneSubtitle">or drag and drop PDFs here</p>
+        <button type="button" class="primary-btn" id="browseBtn">
+          <span>Choose Files</span>
+        </button>
+        <input type="file" id="pdfFileInput" accept=".pdf,application/pdf" multiple style="display: none;">
+        <input type="file" id="imgFileInput" accept="image/jpeg,image/png,image/webp" multiple style="display: none;">
+      </div>
+
+      <!-- Workspace Work Area (file cards, page thumbnails, and settings) -->
+      <div id="workArea" style="display: none;">
+        <div class="workspace-content">
+          <!-- Main Work View -->
+          <div id="itemsContainer">
+            <!-- Dynamically populated file list or page thumbnails -->
+            <div id="filesList" class="file-cards-container" style="display: none;"></div>
+            <div id="pagesGrid" class="pages-grid" style="display: none;"></div>
+          </div>
+
+          <!-- Settings Sidebar -->
+          <div class="settings-panel">
+            <h3 id="settingsTitle">Options</h3>
+            
+            <!-- Dynamic Tool-specific settings -->
+            <div id="toolSettings"></div>
+
+            <!-- Action button -->
+            <button type="button" id="executeBtn" class="primary-btn" style="width: 100%; justify-content: center; margin-top: 1rem;">
+              <span id="executeBtnText">Process PDF</span>
+            </button>
+
+            <!-- Status Banner -->
+            <div id="statusBanner" class="status-banner" role="status"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <p>PDFTool &bull; Client-Side PDF Suite &bull; Files are processed entirely in memory in your browser. No files are ever uploaded to any server.</p>
+  </footer>
+
+  <script src="pdf_core.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
