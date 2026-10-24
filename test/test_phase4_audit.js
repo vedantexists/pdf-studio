@@ -373,8 +373,9 @@ async function runAuditSuite() {
     const repairedLatin = new TextDecoder('latin1').decode(repairedBytes);
 
     // The repaired trailer /Root must NOT reference the fake object 999 0 R
-    const rootMatch = repairedLatin.match(/\/Root\s+(\d+)\s+(\d+)\s+R/);
-    assert(rootMatch, 'Repaired document must contain a reconstructed /Root reference');
+    const trailerStr = repairedLatin.slice(repairedLatin.lastIndexOf('trailer'));
+    const rootMatch = trailerStr.match(/\/Root\s+(\d+)\s+(\d+)\s+R/);
+    assert(rootMatch, 'Repaired document must contain a reconstructed /Root reference in trailer');
     const rootObjNum = parseInt(rootMatch[1], 10);
     assert.notStrictEqual(rootObjNum, 999, 'repairPDF must NOT match fake /Root 999 0 R inside stream body');
 

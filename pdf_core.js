@@ -65,6 +65,8 @@
     PDFDropdown,
     PDFRadioGroup,
     PDFOptionList,
+    PDFArray,
+    PDFRef,
   } = PDFLib;
 
   const latin1Decoder = new TextDecoder('latin1');
@@ -957,7 +959,7 @@
    */
   async function repairPDF(pdfBytes) {
     if (!pdfBytes) throw new Error('PDF bytes are required to repair.');
-    let bytes = pdfBytes instanceof Uint8Array ? pdfBytes : new Uint8Array(pdfBytes);
+    let bytes = pdfBytes instanceof Uint8Array ? pdfBytes.slice() : new Uint8Array(pdfBytes);
 
     const tailSlice = bytes.slice(Math.max(0, bytes.length - 1500));
     const tailStr = latin1Decoder.decode(tailSlice);
@@ -998,7 +1000,17 @@
           }
         }
 
-        const rootRef = rootMatch ? rootMatch[1] + ' ' + rootMatch[2] + ' R' : '1 0 R';
+        let rootRef = null;
+        if (rootMatch) {
+          rootRef = rootMatch[1] + ' ' + rootMatch[2] + ' R';
+        } else {
+          const catalogMatch = cleanStr.match(/(\d+)\s+(\d+)\s+obj(?:(?!endobj)[\s\S])*?\/Type\s*\/Catalog/);
+          if (catalogMatch) {
+            rootRef = catalogMatch[1] + ' ' + catalogMatch[2] + ' R';
+          } else {
+            rootRef = '1 0 R';
+          }
+        }
         const trailer = 'trailer\n<<\n  /Size ' + size + '\n  /Root ' + rootRef + '\n>>\nstartxref\n';
 
         const lastEndObj = fullStr.lastIndexOf('endobj');
@@ -1016,18 +1028,6 @@
       const enc = doc.context.lookup(doc.context.trailerInfo.Encrypt);
       if (!enc || typeof enc.get !== 'function') {
         delete doc.context.trailerInfo.Encrypt;
-      }
-    }
-
-    // Re-compress stream contents with Flate so uncompressed fake tokens inside streams
-    // are safely binary encoded and do not masquerade as trailer /Root references
-    for (const [ref, obj] of doc.context.enumerateIndirectObjects()) {
-      if (obj && typeof obj.getContents === 'function' && obj.dict) {
-        try {
-          const contents = obj.getContents();
-          const flated = doc.context.flateStream(contents);
-          doc.context.assign(ref, flated);
-        } catch (e) {}
       }
     }
 
@@ -1407,7 +1407,8 @@
    */
   async function redactPDF(pdfBytes, redactions = []) {
     if (!pdfBytes) throw new Error('PDF bytes are required to redact.');
-    const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+    const safeBytes = pdfBytes instanceof Uint8Array ? pdfBytes.slice() : new Uint8Array(pdfBytes);
+    const doc = await PDFDocument.load(safeBytes, { ignoreEncryption: true });
     const pages = doc.getPages();
     const boxes = Array.isArray(redactions) ? redactions : [redactions];
 
@@ -1428,12 +1429,19 @@
 
     for (const [pIdx, pageBoxes] of boxesByPage.entries()) {
       const page = pages[pIdx];
-      const contentsNode = page.node.Contents();
-      if (!contentsNode) continue;
+      const rawContents = page.node.get(PDFName.of('Contents'));
+      if (!rawContents) continue;
 
-      const streamRefs = contentsNode.asArray ? contentsNode.asArray() : [contentsNode];
-      for (const ref of streamRefs) {
-        const streamObj = doc.context.lookup(ref);
+      const items = rawContents instanceof PDFArray ? rawContents.asArray() : [rawContents];
+      for (const item of items) {
+        let streamObj;
+        let targetRef = null;
+        if (item instanceof PDFRef) {
+          targetRef = item;
+          streamObj = doc.context.lookup(item);
+        } else {
+          streamObj = item;
+        }
         if (!streamObj) continue;
 
         let rawBytes;
@@ -1466,7 +1474,12 @@
 
         const sanitizedStr = sanitizeContentStream(streamStr, pageBoxes);
         const newStream = doc.context.flateStream(new TextEncoder().encode(sanitizedStr));
-        doc.context.assign(ref, newStream);
+        if (targetRef) {
+          doc.context.assign(targetRef, newStream);
+        } else {
+          const registered = doc.context.register(newStream);
+          page.node.set(PDFName.of('Contents'), registered);
+        }
       }
     }
 
