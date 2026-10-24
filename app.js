@@ -1524,6 +1524,105 @@ document.addEventListener('DOMContentLoaded', () => {
           </label>
         </div>
       `;
+    } else if (currentTool === 'compress' || currentTool === 'compress-pdf') {
+      const origSizeKb = file ? Math.round(file.size / 1024) : 0;
+      toolSettings.innerHTML = `
+        <div class="setting-group">
+          <label>Compression Level</label>
+          <div class="radio-group">
+            <label class="radio-option">
+              <input type="radio" name="compressPreset" value="recommended" checked>
+              <span><strong>Recommended Compression</strong><br><small style="color:var(--text-muted)">Balanced file size reduction & crisp text</small></span>
+            </label>
+            <label class="radio-option">
+              <input type="radio" name="compressPreset" value="extreme">
+              <span><strong>Extreme Compression</strong><br><small style="color:var(--text-muted)">Maximum file size reduction</small></span>
+            </label>
+            <label class="radio-option">
+              <input type="radio" name="compressPreset" value="less">
+              <span><strong>Less Compression</strong><br><small style="color:var(--text-muted)">Highest fidelity, light stream compaction</small></span>
+            </label>
+          </div>
+        </div>
+        <div class="setting-group" style="margin-top: 0.75rem;">
+          <label class="checkbox-option">
+            <input type="checkbox" id="compressStripMetadata" checked>
+            <span>Strip document metadata & unreferenced tokens</span>
+          </label>
+        </div>
+        <div style="background: var(--bg-surface); padding: 0.75rem; border-radius: 6px; border: 1px solid var(--border); font-size: 0.85rem; margin-top: 0.75rem;">
+          <strong>Original Size:</strong> ${origSizeKb} KB<br>
+          <strong>Target:</strong> Flate-deflated object streams
+        </div>
+      `;
+    } else if (currentTool === 'repair' || currentTool === 'repair-pdf') {
+      const fileSizeKb = file ? Math.round(file.size / 1024) : 0;
+      toolSettings.innerHTML = `
+        <div class="setting-group">
+          <label>Repair & Reconstruction Analysis</label>
+          <p class="setting-hint" style="line-height: 1.5;">
+            Scans document token stream for unreferenced indirect objects, repairs broken or truncated trailer dictionaries, heals missing EOF markers, and reconstructs standard cross-reference (XRef) offset tables in-memory.
+          </p>
+          <div style="background: var(--bg-surface); padding: 0.75rem; border-radius: 6px; border: 1px solid var(--border); font-size: 0.85rem; margin-top: 0.75rem;">
+            <strong>Status:</strong> Ready for reconstruction<br>
+            <strong>Document Size:</strong> ${fileSizeKb} KB
+          </div>
+        </div>
+      `;
+    } else if (currentTool === 'redact' || currentTool === 'redact-pdf') {
+      toolSettings.innerHTML = `
+        <div class="setting-group">
+          <label for="redactPageSelect">Target Page</label>
+          <select id="redactPageSelect">
+            ${Array.from({ length: totalPages }, (_, i) => `<option value="${i}">Page ${i + 1}</option>`).join('')}
+          </select>
+        </div>
+        <div class="setting-group">
+          <label for="redactLabelInput">Redaction Text Label (Optional)</label>
+          <input type="text" id="redactLabelInput" placeholder="e.g. [REDACTED]" value="[REDACTED]">
+          <span class="setting-hint">White text printed centered inside the blackout bar.</span>
+        </div>
+        <div class="setting-group">
+          <label>Quick Area Presets</label>
+          <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.25rem;">
+            <button type="button" class="secondary-btn" id="redactPresetHeader" style="flex:1;">Header</button>
+            <button type="button" class="secondary-btn" id="redactPresetCenter" style="flex:1;">Center</button>
+            <button type="button" class="secondary-btn" id="redactPresetFooter" style="flex:1;">Footer</button>
+          </div>
+        </div>
+        <div class="setting-group" style="margin-top: 0.5rem;">
+          <label>Coordinates (PDF points)</label>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+            <div><small>X</small><input type="number" id="redactX" value="50"></div>
+            <div><small>Y</small><input type="number" id="redactY" value="450"></div>
+            <div><small>Width</small><input type="number" id="redactW" value="250"></div>
+            <div><small>Height</small><input type="number" id="redactH" value="30"></div>
+          </div>
+        </div>
+      `;
+
+      setTimeout(() => {
+        const btnH = document.getElementById('redactPresetHeader');
+        const btnC = document.getElementById('redactPresetCenter');
+        const btnF = document.getElementById('redactPresetFooter');
+        if (btnH) btnH.onclick = () => { document.getElementById('redactX').value = 50; document.getElementById('redactY').value = 700; document.getElementById('redactW').value = 400; document.getElementById('redactH').value = 35; };
+        if (btnC) btnC.onclick = () => { document.getElementById('redactX').value = 50; document.getElementById('redactY').value = 450; document.getElementById('redactW').value = 300; document.getElementById('redactH').value = 40; };
+        if (btnF) btnF.onclick = () => { document.getElementById('redactX').value = 50; document.getElementById('redactY').value = 50; document.getElementById('redactW').value = 400; document.getElementById('redactH').value = 30; };
+      }, 50);
+    } else if (currentTool === 'compare' || currentTool === 'compare-pdf') {
+      const docAName = uploadedFiles[0] ? uploadedFiles[0].name : 'Document A';
+      const docBName = uploadedFiles[1] ? uploadedFiles[1].name : 'Not yet selected (use + Add More Files)';
+      toolSettings.innerHTML = `
+        <div class="setting-group">
+          <label>Document Comparison</label>
+          <p class="setting-hint" style="line-height: 1.5;">Compare two versions of a PDF document to verify modifications and discrepancies.</p>
+          <div style="background: var(--bg-surface); padding: 0.75rem; border-radius: 6px; border: 1px solid var(--border); font-size: 0.85rem; margin-top: 0.5rem; line-height: 1.6;">
+            <strong>Document A:</strong> ${docAName}<br>
+            <strong>Document B:</strong> ${docBName}
+          </div>
+          ${uploadedFiles.length < 2 ? '<p class="setting-hint" style="color: var(--accent); margin-top: 0.5rem;">Click "+ Add More Files" above to upload Document B.</p>' : ''}
+        </div>
+      `;
     } else if (currentTool === 'remove-pages') {
       const sorted = Array.from(selectedRemovePages).sort((a, b) => a - b);
       toolSettings.innerHTML = `

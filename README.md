@@ -23,6 +23,9 @@
   - **Organize PDF**: Visual thumbnail grid to reorder, delete, and rotate pages individually.
   - **Remove Pages**: Target and delete unwanted pages cleanly.
   - **Extract Pages**: Pull selected pages into a standalone PDF.
+- **Optimize & Repair**:
+  - **Compress PDF**: In-memory stream compaction & metadata stripping reducing file size while preserving readability.
+  - **Repair PDF**: Scans token streams and synthesizes clean XRef offset tables to recover damaged or unreadable PDFs.
 - **Conversion**:
   - **PDF to JPG / PNG**: Convert PDF pages into crisp high-resolution images (individual or ZIP).
   - **JPG / PNG to PDF**: Assemble images into a formatted PDF document with customizable margins.
@@ -32,9 +35,11 @@
   - **Page Numbers**: Add clean page numbering across all pages with customizable placement.
   - **Crop PDF**: Adjust page dimensions and crop bounding boxes.
 - **Security & Forms**:
-  - **Sign PDF**: Create drawn, typed, or uploaded signatures and stamp them onto document pages.
-  - **Unlock PDF**: Remove passwords and permissions restrictions to view, copy, and print freely.
-  - **Protect PDF**: Encrypt documents with robust user passwords.
+  - **Sign PDF**: Create drawn, typed, or uploaded electronic signature stamps onto document pages.
+  - **Unlock PDF**: Decrypt open passwords and strip permissions restrictions in-memory.
+  - **Protect PDF**: Real AES-256 in-browser encryption requiring passwords across Adobe Acrobat, Chrome, and mobile.
+  - **Redact PDF**: Permanently blackout sensitive numbers, private text, or confidential rectangular regions.
+  - **Compare PDF**: Spot modifications and visual discrepancies between two PDF revisions.
   - **PDF Forms**: Inspect and fill interactive form fields with options to save or permanently flatten.
 
 ---

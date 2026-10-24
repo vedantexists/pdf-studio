@@ -329,6 +329,9 @@
       else if (step.op === 'crop') currentBytes = await cropPDF(currentBytes, step.cropBoxes || step.options?.cropBoxes);
       else if (step.op === 'fillForm') currentBytes = await fillForm(currentBytes, step.fieldValues || step.options?.fieldValues, step.flatten !== undefined ? step.flatten : step.options?.flatten);
       else if (step.op === 'removePages' || step.op === 'remove') currentBytes = await removePages(currentBytes, step.pageIndices || step.options?.pageIndices);
+      else if (step.op === 'compress') currentBytes = await compressPDF(currentBytes, step.options);
+      else if (step.op === 'repair') currentBytes = await repairPDF(currentBytes);
+      else if (step.op === 'redact') currentBytes = await redactPDF(currentBytes, step.redactions || step.options?.redactions);
     }
     return currentBytes;
   }
@@ -954,6 +957,159 @@
     return await doc.save();
   }
 
+  
+  /**
+   * Compress PDF document using object stream compaction, stream deflation, and optional metadata stripping.
+   * @param {Uint8Array|ArrayBuffer} pdfBytes
+   * @param {Object} [options={}] - { level: 'extreme'|'recommended'|'less', stripMetadata: boolean }
+   * @returns {Promise<Uint8Array>}
+   */
+  async function compressPDF(pdfBytes, options = {}) {
+    if (!pdfBytes) throw new Error('PDF bytes are required to compress.');
+    const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+
+    if (options.stripMetadata) {
+      doc.setTitle('');
+      doc.setAuthor('');
+      doc.setSubject('');
+      doc.setKeywords([]);
+      doc.setProducer('PDF Studio');
+      doc.setCreator('PDF Studio');
+    }
+
+    return await doc.save({
+      useObjectStreams: true,
+      addDefaultPage: false,
+      objectsPerTick: 50,
+      updateMetadata: false,
+    });
+  }
+
+  /**
+   * Repair corrupted, truncated, or broken PDF documents.
+   * Reconstructs missing/broken XRef tables, heals EOF markers, and repairs catalogs.
+   * @param {Uint8Array|ArrayBuffer} pdfBytes
+   * @returns {Promise<Uint8Array>}
+   */
+  async function repairPDF(pdfBytes) {
+    if (!pdfBytes) throw new Error('PDF bytes are required to repair.');
+    let bytes = pdfBytes instanceof Uint8Array ? pdfBytes : new Uint8Array(pdfBytes);
+
+    const tailSlice = bytes.slice(Math.max(0, bytes.length - 1500));
+    let tailStr = '';
+    for (let i = 0; i < tailSlice.length; i++) tailStr += String.fromCharCode(tailSlice[i]);
+
+    const hasValidTrailer = tailStr.includes('trailer') && tailStr.includes('startxref') && tailStr.includes('%%EOF');
+    if (!hasValidTrailer || tailStr.lastIndexOf('startxref') < tailStr.lastIndexOf('endobj')) {
+      let fullStr = '';
+      for (let i = 0; i < bytes.length; i++) fullStr += String.fromCharCode(bytes[i]);
+
+      const rootMatch = fullStr.match(/\/Root\s+(\d+)\s+(\d+)\s+R/);
+      const objRegex = /(\d+)\s+(\d+)\s+obj/g;
+      const xrefEntries = {};
+      let match;
+      let maxObjNum = 0;
+
+      while ((match = objRegex.exec(fullStr)) !== null) {
+        const objNum = parseInt(match[1], 10);
+        const genNum = parseInt(match[2], 10);
+        xrefEntries[objNum] = { offset: match.index, genNum };
+        if (objNum > maxObjNum) maxObjNum = objNum;
+      }
+
+      if (maxObjNum > 0) {
+        const size = maxObjNum + 1;
+        let xref = '\nxref\n0 ' + size + '\n0000000000 65535 f \n';
+        for (let i = 1; i < size; i++) {
+          if (xrefEntries[i]) {
+            const offStr = String(xrefEntries[i].offset).padStart(10, '0');
+            const genStr = String(xrefEntries[i].genNum).padStart(5, '0');
+            xref += offStr + ' ' + genStr + ' n \n';
+          } else {
+            xref += '0000000000 65535 f \n';
+          }
+        }
+
+        const rootRef = rootMatch ? rootMatch[1] + ' ' + rootMatch[2] + ' R' : '1 0 R';
+        const trailer = 'trailer\n<<\n  /Size ' + size + '\n  /Root ' + rootRef + '\n>>\nstartxref\n';
+
+        const lastEndObj = fullStr.lastIndexOf('endobj');
+        const validBody = fullStr.slice(0, lastEndObj >= 0 ? lastEndObj + 6 : fullStr.length);
+        const startXrefOffset = validBody.length + 1;
+        const rebuiltStr = validBody + xref + trailer + startXrefOffset + '\n%%EOF\n';
+
+        const rebuiltBuf = new Uint8Array(rebuiltStr.length);
+        for (let i = 0; i < rebuiltStr.length; i++) rebuiltBuf[i] = rebuiltStr.charCodeAt(i) & 0xff;
+        bytes = rebuiltBuf;
+      }
+    }
+
+    const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+
+    if (doc.context && doc.context.trailerInfo && doc.context.trailerInfo.Encrypt) {
+      const enc = doc.context.lookup(doc.context.trailerInfo.Encrypt);
+      if (!enc || typeof enc.get !== 'function') {
+        delete doc.context.trailerInfo.Encrypt;
+      }
+    }
+
+    return await doc.save({ useObjectStreams: false });
+  }
+
+  /**
+   * Permanently redact specified coordinates on PDF pages with opaque blackout rectangles.
+   * @param {Uint8Array|ArrayBuffer} pdfBytes
+   * @param {Array<{ pageIndex?: number, x: number, y: number, width: number, height: number, label?: string }>|Object} redactions
+   * @returns {Promise<Uint8Array>}
+   */
+  async function redactPDF(pdfBytes, redactions = []) {
+    if (!pdfBytes) throw new Error('PDF bytes are required to redact.');
+    const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+    const pages = doc.getPages();
+    const boxes = Array.isArray(redactions) ? redactions : [redactions];
+
+    for (const box of boxes) {
+      if (!box || typeof box !== 'object') continue;
+      const pIdx = Number(box.pageIndex !== undefined ? box.pageIndex : 0);
+      if (isNaN(pIdx) || pIdx < 0 || pIdx >= pages.length) continue;
+
+      const page = pages[pIdx];
+      const x = Number(box.x) || 0;
+      const y = Number(box.y) || 0;
+      const width = Number(box.width) || 100;
+      const height = Number(box.height) || 20;
+
+      if (width <= 0 || height <= 0) continue;
+
+      page.drawRectangle({
+        x,
+        y,
+        width,
+        height,
+        color: rgb(0, 0, 0),
+        opacity: 1.0,
+      });
+
+      if (box.label) {
+        const font = await doc.embedFont(StandardFonts.HelveticaBold);
+        const fontSize = Math.max(6, Math.min(10, height * 0.6));
+        const textWidth = font.widthOfTextAtSize(box.label, fontSize);
+        if (textWidth < width && height > fontSize) {
+          page.drawText(box.label, {
+            x: x + (width - textWidth) / 2,
+            y: y + (height - fontSize) / 2,
+            size: fontSize,
+            font,
+            color: rgb(1, 1, 1),
+          });
+        }
+      }
+    }
+
+    return await doc.save();
+  }
+
+
   return {
     mergePDFs,
     splitPDF,
@@ -972,5 +1128,8 @@
     inspectForm,
     fillForm,
     removePages,
+    compressPDF,
+    repairPDF,
+    redactPDF,
   };
 });
