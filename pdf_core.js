@@ -152,10 +152,15 @@
 
     for (const item of imageList) {
       let image;
-      if (item.type === 'png' || (item.mime && item.mime.includes('png'))) {
-        image = await doc.embedPng(item.bytes);
+      let imgBytes = item.bytes;
+      if (imgBytes && (imgBytes.byteOffset !== 0 || imgBytes.byteLength !== imgBytes.buffer?.byteLength)) {
+        imgBytes = new Uint8Array(imgBytes.slice());
+      }
+      const isPng = item.type === 'png' || (item.mime && item.mime.includes('png')) || (item.type && item.type.includes('png'));
+      if (isPng) {
+        image = await doc.embedPng(imgBytes);
       } else {
-        image = await doc.embedJpg(item.bytes);
+        image = await doc.embedJpg(imgBytes);
       }
 
       let pageWidth, pageHeight;
@@ -618,6 +623,10 @@
       throw new Error('Signature graphic data cannot be empty.');
     }
 
+    if (rawBytes.byteOffset !== 0 || rawBytes.byteLength !== rawBytes.buffer?.byteLength) {
+      rawBytes = new Uint8Array(rawBytes.slice());
+    }
+
     const isPng = (rawBytes[0] === 0x89 && rawBytes[1] === 0x50) || options.imageType === 'png';
     let image;
     if (isPng) {
@@ -815,17 +824,24 @@
               field.uncheck();
             }
           } else if (PDFDropdown && field instanceof PDFDropdown) {
+            const validOptions = field.getOptions();
             if (Array.isArray(val)) {
-              val.forEach((item) => field.select(String(item)));
-            } else {
+              const validSubset = val.filter((item) => validOptions.includes(String(item)));
+              if (validSubset.length > 0) validSubset.forEach((item) => field.select(String(item)));
+            } else if (validOptions.includes(String(val))) {
               field.select(String(val));
             }
           } else if (PDFRadioGroup && field instanceof PDFRadioGroup) {
-            field.select(String(val));
+            const validOptions = field.getOptions();
+            if (validOptions.includes(String(val))) {
+              field.select(String(val));
+            }
           } else if (PDFOptionList && field instanceof PDFOptionList) {
+            const validOptions = field.getOptions();
             if (Array.isArray(val)) {
-              val.forEach((item) => field.select(String(item)));
-            } else {
+              const validSubset = val.filter((item) => validOptions.includes(String(item)));
+              if (validSubset.length > 0) field.select(validSubset);
+            } else if (validOptions.includes(String(val))) {
               field.select(String(val));
             }
           } else {

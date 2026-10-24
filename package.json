@@ -1,7 +1,7 @@
 {
-  "name": "pdftool",
+  "name": "pdf-studio",
   "version": "1.0.0",
-  "description": "Fast, private client-side PDF tool suite (iLovePDF clone)",
+  "description": "Fast, zero-upload client-side PDF studio suite",
   "main": "app.js",
   "scripts": {
     "start": "node server.js",

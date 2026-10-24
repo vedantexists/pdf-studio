@@ -1,4 +1,4 @@
-# PDF-Studio - Fast, Zero-Upload Client-Side PDF tool
+# PDF Studio - Fast, Zero-Upload Client-Side PDF Tools
 
 > **100% private, in-browser PDF manipulation suite. Zero server uploads.**
 
@@ -12,7 +12,7 @@
 
 ## 🎬 Live Interactive Preview
 
-![PDFForge Studio Workflow](assets/demo.svg)
+![PDF Studio Workflow](assets/demo.svg)
 
 ---
 
@@ -50,7 +50,7 @@ All processing happens entirely in client memory using WebAssembly and pure Java
 ## Quick Start
 
 ### Option 1: Open Live Web App
-Open the deployed studio at **[https://vedantexists.github.io/pdftool/](https://vedantexists.github.io/pdftool/)**.
+Open the deployed studio at **[https://vedantexists.github.io/pdf-studio/](https://vedantexists.github.io/pdf-studio/)**.
 
 ### Option 2: Open directly from disk
 Open `index.html` directly in any modern web browser (Chrome, Edge, Firefox, Safari).

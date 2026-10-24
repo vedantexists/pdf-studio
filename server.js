@@ -54,5 +54,5 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`PDFTool running at http://localhost:${PORT}`);
+  console.log(`PDF Studio running at http://localhost:${PORT}`);
 });
