@@ -686,6 +686,32 @@
       </div>
       <div class="modal-body" id="formModalBody"></div>
     </div>
+    <div id="scanModal" class="modal-dialog" style="display: none; max-width: 640px;" role="dialog" aria-modal="true" aria-labelledby="scanModalTitle">
+      <div class="modal-header">
+        <h3 id="scanModalTitle">📷 Live Document Camera Scanner</h3>
+        <button type="button" class="modal-close-btn" data-close-modal aria-label="Close modal">✕</button>
+      </div>
+      <div class="modal-body" id="scanModalBody">
+        <div style="position: relative; width: 100%; background: #0f172a; border-radius: 8px; overflow: hidden; display: flex; justify-content: center; align-items: center; min-height: 280px;">
+          <video id="scanVideo" autoplay playsinline style="width: 100%; max-height: 360px; object-fit: contain;"></video>
+          <canvas id="scanCaptureCanvas" style="display: none;"></canvas>
+        </div>
+        <div style="display: flex; gap: 0.5rem; justify-content: center; margin-top: 0.75rem;">
+          <button type="button" class="primary-btn" id="scanCaptureBtn">📸 Capture Page</button>
+          <button type="button" class="secondary-btn" id="scanSwitchCameraBtn">🔄 Switch Camera</button>
+        </div>
+        <div style="margin-top: 1rem;">
+          <label style="font-size: 0.85rem; font-weight: 600; color: var(--text-muted);">Captured Pages Tray:</label>
+          <div id="scanPagesTray" style="display: flex; gap: 0.5rem; overflow-x: auto; padding: 0.5rem; background: var(--bg-surface); border: 1px solid var(--border); border-radius: 6px; min-height: 85px; margin-top: 0.25rem;">
+            <p id="scanEmptyTrayNotice" style="margin: auto; color: var(--text-muted); font-size: 0.85rem;">Captured pages will appear here</p>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="secondary-btn" id="scanCancelBtn">Cancel</button>
+        <button type="button" class="primary-btn" id="scanFinishBtn" disabled>Assemble PDF (0 pages)</button>
+      </div>
+    </div>
   </div>
 
       <footer>

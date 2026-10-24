@@ -68,6 +68,32 @@ document.addEventListener('DOMContentLoaded', () => {
   let selectedRemovePages = new Set();
   let selectedExtractPages = new Set();
 
+  // PDF.js Memory Management & Active Document Tracking
+  const activePdfDocs = new Set();
+  let currentThumbPdfDoc = null;
+  function trackPdfDoc(doc) {
+    if (doc && typeof doc.destroy === 'function') {
+      activePdfDocs.add(doc);
+    }
+    return doc;
+  }
+  async function cleanupActivePdfDocs() {
+    if (currentThumbPdfDoc && typeof currentThumbPdfDoc.destroy === 'function') {
+      try {
+        await currentThumbPdfDoc.destroy();
+      } catch (e) {}
+      currentThumbPdfDoc = null;
+    }
+    for (const doc of activePdfDocs) {
+      try {
+        if (typeof doc.destroy === 'function') {
+          await doc.destroy();
+        }
+      } catch (e) {}
+    }
+    activePdfDocs.clear();
+  }
+
   // Complete Tools Registry
   const TOOLS = {
     'merge': {
@@ -443,7 +469,8 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // --- Navigation & Routing ---
-  function showDashboard() {
+  async function showDashboard() {
+    await cleanupActivePdfDocs();
     currentTool = null;
     uploadedFiles = [];
     activePages = [];
@@ -461,7 +488,8 @@ document.addEventListener('DOMContentLoaded', () => {
     dropzone.style.display = 'block';
   }
 
-  function openTool(toolKey) {
+  async function openTool(toolKey) {
+    await cleanupActivePdfDocs();
     if (!TOOLS[toolKey]) {
       console.warn(`Tool "${toolKey}" is not recognized.`);
       return;
@@ -481,12 +509,56 @@ document.addEventListener('DOMContentLoaded', () => {
     activeToolIcon.textContent = meta.icon;
     executeBtnText.textContent = meta.actionText;
 
-    if (meta.acceptImages) {
+    if (meta.accept) {
+      pdfFileInput.accept = meta.accept;
+    } else {
+      pdfFileInput.accept = meta.acceptImages ? 'image/*' : '.pdf,application/pdf';
+    }
+    pdfFileInput.multiple = !!meta.multiple;
+
+    if (toolKey === 'text-to-pdf' || toolKey === 'txt-to-pdf') {
+      uploadedFiles = [{ name: 'document.txt', size: 0, bytes: new Uint8Array(), pageCount: 1 }];
+      dashboardView.style.display = 'none';
+      workspaceView.style.display = 'block';
+      dropzone.style.display = 'none';
+      workArea.style.display = 'block';
+      updateActiveNavIndicator(toolKey);
+      await renderToolWorkspace();
+      return;
+    }
+
+    if (toolKey === 'scan-to-pdf' || toolKey === 'scan') {
+      dropzoneHeading.textContent = 'Scan Documents from Camera or Upload Photos';
+      dropzoneSubtitle.textContent = 'Capture pages directly with your device camera or select photos to assemble into PDF';
+      browseBtn.innerHTML = '<span>📷 Launch Camera Scanner</span>';
+    } else if (toolKey === 'compare' || toolKey === 'compare-pdf') {
+      dropzoneHeading.textContent = 'Select 2 PDF Documents to Compare';
+      dropzoneSubtitle.textContent = 'Select Document A and Document B to spot visual changes & pixel differences';
+      browseBtn.innerHTML = '<span>Choose PDF Documents</span>';
+    } else if (toolKey === 'compress' || toolKey === 'compress-pdf') {
+      dropzoneHeading.textContent = 'Select PDF file to compress';
+      dropzoneSubtitle.textContent = 'Smart stream compaction & image downsampling • 100% Private';
+      browseBtn.innerHTML = '<span>Choose PDF Document</span>';
+    } else if (toolKey === 'repair' || toolKey === 'repair-pdf') {
+      dropzoneHeading.textContent = 'Select damaged or corrupted PDF file';
+      dropzoneSubtitle.textContent = 'Reconstructs XRef tables, heals EOF markers & object graphs';
+      browseBtn.innerHTML = '<span>Choose PDF Document</span>';
+    } else if (toolKey === 'redact' || toolKey === 'redact-pdf') {
+      dropzoneHeading.textContent = 'Select PDF file to redact';
+      dropzoneSubtitle.textContent = 'Permanently black out private text and strip underlying stream data';
+      browseBtn.innerHTML = '<span>Choose PDF Document</span>';
+    } else if (toolKey === 'pdf-to-text' || toolKey === 'pdf-to-txt') {
+      dropzoneHeading.textContent = 'Select PDF file to extract text';
+      dropzoneSubtitle.textContent = 'Extracts all text, headings, and markdown tables directly in-browser';
+      browseBtn.innerHTML = '<span>Choose PDF Document</span>';
+    } else if (meta.acceptImages) {
       dropzoneHeading.textContent = 'Select Image files';
       dropzoneSubtitle.textContent = 'or drag and drop JPG, PNG, WebP images here';
+      browseBtn.innerHTML = '<span>Choose Image Files</span>';
     } else {
       dropzoneHeading.textContent = 'Select PDF files';
       dropzoneSubtitle.textContent = 'or drag and drop PDFs here';
+      browseBtn.innerHTML = '<span>Choose PDF Document</span>';
     }
 
     dashboardView.style.display = 'none';
@@ -609,6 +681,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // --- Drop Zone & File Selection ---
   browseBtn.addEventListener('click', (e) => {
     e.stopPropagation();
+    if (currentTool === 'scan-to-pdf' || currentTool === 'scan') {
+      openCameraScanner();
+      return;
+    }
     if (TOOL_METADATA[currentTool].acceptImages) {
       imgFileInput.click();
     } else {
@@ -659,15 +735,19 @@ document.addEventListener('DOMContentLoaded', () => {
     showStatus('Loading file(s)...', 'processing');
 
     try {
+      const isTextTool = currentTool === 'text-to-pdf' || currentTool === 'txt-to-pdf';
       const validFiles = files.filter((f) => {
         if (meta.acceptImages) {
           return f.type.startsWith('image/');
+        }
+        if (isTextTool) {
+          return f.type.startsWith('text/') || f.name.toLowerCase().endsWith('.txt') || f.name.toLowerCase().endsWith('.md');
         }
         return f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf');
       });
 
       if (validFiles.length === 0) {
-        throw new Error(meta.acceptImages ? 'Please select valid image files (JPG, PNG, WebP).' : 'Please select valid PDF files.');
+        throw new Error(meta.acceptImages ? 'Please select valid image files (JPG, PNG, WebP).' : isTextTool ? 'Please select valid text files (.txt, .md).' : 'Please select valid PDF files.');
       }
 
       // Read file bytes
@@ -677,7 +757,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const bytes = new Uint8Array(buffer);
         let pageCount = 1;
 
-        if (!meta.acceptImages) {
+        if (!meta.acceptImages && !isTextTool) {
           try {
             // Load with PDFLib to determine valid page count immediately
             const pdfDoc = await PDFLib.PDFDocument.load(bytes.slice(), { ignoreEncryption: true });
@@ -699,6 +779,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // If single file tool, replace uploaded files
       if (!meta.multiple) {
+        await cleanupActivePdfDocs();
         uploadedFiles = [processedItems[0]];
       } else {
         uploadedFiles = [...uploadedFiles, ...processedItems];
@@ -740,7 +821,13 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       // Render workspace
-      renderToolWorkspace();
+      await renderToolWorkspace();
+
+      if (isTextTool && processedItems[0]) {
+        const text = new TextDecoder('utf-8').decode(processedItems[0].bytes);
+        const editor = document.getElementById('textToPdfInput');
+        if (editor) editor.value = text;
+      }
     } catch (err) {
       console.error(err);
       showStatus(err.message, 'error');
@@ -751,12 +838,16 @@ document.addEventListener('DOMContentLoaded', () => {
   async function renderToolWorkspace() {
     renderSettingsPanel();
 
-    if (currentTool === 'merge' || currentTool === 'img-to-pdf') {
+    if (currentTool === 'merge' || currentTool === 'img-to-pdf' || currentTool === 'compare' || currentTool === 'compare-pdf') {
       // Show file list with reorder buttons
       pagesGrid.style.display = 'none';
       filesList.style.display = 'flex';
       removeSignPreview();
       renderFileList();
+    } else if (currentTool === 'text-to-pdf' || currentTool === 'txt-to-pdf') {
+      pagesGrid.style.display = 'none';
+      filesList.style.display = 'none';
+      removeSignPreview();
     } else if (currentTool === 'sign' || currentTool === 'sign-pdf') {
       filesList.style.display = 'none';
       pagesGrid.style.display = 'none';
@@ -844,6 +935,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!canvas || !file || !file.bytes) return;
 
     if (window.pdfjsLib) {
+      let pdf = null;
       try {
         if (!window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
           window.pdfjsLib.GlobalWorkerOptions.workerSrc = window.location.protocol.startsWith('http')
@@ -851,7 +943,7 @@ document.addEventListener('DOMContentLoaded', () => {
             : 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
         }
         const clonedBytes = file.bytes.slice();
-        const pdf = await window.pdfjsLib.getDocument({ data: clonedBytes }).promise;
+        pdf = trackPdfDoc(await window.pdfjsLib.getDocument({ data: clonedBytes }).promise);
         const page = await pdf.getPage(pageNum);
         const originalViewport = page.getViewport({ scale: 1.0 });
         currentPdfPageSize = { width: originalViewport.width, height: originalViewport.height };
@@ -867,6 +959,13 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       } catch (err) {
         console.warn('PDF.js render in sign preview failed, using canvas placeholder:', err);
+      } finally {
+        if (pdf && typeof pdf.destroy === 'function') {
+          try {
+            await pdf.destroy();
+            activePdfDocs.delete(pdf);
+          } catch (e) {}
+        }
       }
     }
 
@@ -1060,6 +1159,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!canvas || !file || !file.bytes) return;
 
     if (window.pdfjsLib) {
+      let pdf = null;
       try {
         if (!window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
           window.pdfjsLib.GlobalWorkerOptions.workerSrc = window.location.protocol.startsWith('http')
@@ -1067,7 +1167,7 @@ document.addEventListener('DOMContentLoaded', () => {
             : 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
         }
         const clonedBytes = file.bytes.slice();
-        const pdf = await window.pdfjsLib.getDocument({ data: clonedBytes }).promise;
+        pdf = trackPdfDoc(await window.pdfjsLib.getDocument({ data: clonedBytes }).promise);
         const page = await pdf.getPage(pageNum);
         const originalViewport = page.getViewport({ scale: 1.0 });
         cropPageSize = { width: originalViewport.width, height: originalViewport.height };
@@ -1083,6 +1183,13 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       } catch (err) {
         console.warn('PDF.js render in crop preview failed, using canvas fallback:', err);
+      } finally {
+        if (pdf && typeof pdf.destroy === 'function') {
+          try {
+            await pdf.destroy();
+            activePdfDocs.delete(pdf);
+          } catch (e) {}
+        }
       }
     }
 
@@ -1255,11 +1362,14 @@ document.addEventListener('DOMContentLoaded', () => {
       const ext = item.name.split('.').pop().toUpperCase();
       const pageInfo = item.pageCount ? ` &bull; ${item.pageCount} page${item.pageCount > 1 ? 's' : ''}` : '';
 
+      const isCompare = currentTool === 'compare' || currentTool === 'compare-pdf';
+      const roleBadge = isCompare ? `<span style="font-size:0.75rem; background:var(--primary); color:#fff; padding:1px 6px; border-radius:3px; margin-right:4px;">${index === 0 ? 'Doc A' : index === 1 ? 'Doc B' : '#' + (index + 1)}</span>` : '';
+
       card.innerHTML = `
         <div class="file-info">
           <span class="file-badge">${ext}</span>
           <div>
-            <div class="file-name" title="${item.name}">${item.name}</div>
+            <div class="file-name" title="${item.name}">${roleBadge}${item.name}</div>
             <div class="file-size">${sizeKb} KB${pageInfo}</div>
           </div>
         </div>
@@ -1273,10 +1383,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Add "Add more files" button
+    const isCompare = currentTool === 'compare' || currentTool === 'compare-pdf';
+    const addBtnText = isCompare && uploadedFiles.length < 2 ? '+ Add Document B (Second Revision)' : '+ Add More Files';
     const addMoreRow = document.createElement('div');
     addMoreRow.style.marginTop = '0.5rem';
     addMoreRow.innerHTML = `
-      <button type="button" class="secondary-btn" id="addMoreFilesBtn">+ Add More Files</button>
+      <button type="button" class="secondary-btn" id="addMoreFilesBtn">${addBtnText}</button>
     `;
     filesList.appendChild(addMoreRow);
 
@@ -1332,11 +1444,58 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  // Fast DOM Page Selection Helpers (Zero Canvas Re-renders)
+  function updateRemovePageCardDOM(pageNum, isSelected) {
+    const card = pagesGrid.querySelector(`.page-thumb-card[data-page-num="${pageNum}"]`);
+    if (card) {
+      card.classList.toggle('selected-for-remove', isSelected);
+      const badge = card.querySelector('.remove-badge');
+      if (badge) {
+        badge.classList.toggle('active', isSelected);
+        badge.textContent = isSelected ? '✕ Remove' : 'Keep';
+      }
+    }
+  }
+
+  function updateExtractPageCardDOM(pageNum, isSelected) {
+    const card = pagesGrid.querySelector(`.page-thumb-card[data-page-num="${pageNum}"]`);
+    if (card) {
+      card.classList.toggle('selected-for-extract', isSelected);
+      const badge = card.querySelector('.extract-badge');
+      if (badge) {
+        badge.classList.toggle('active', isSelected);
+        badge.textContent = isSelected ? '✓ Extract' : 'Skip';
+      }
+    }
+  }
+
+  function syncAllRemoveSelectionDOM() {
+    activePages.forEach((p) => {
+      const isSelected = selectedRemovePages.has(p.pageNum);
+      updateRemovePageCardDOM(p.pageNum, isSelected);
+    });
+  }
+
+  function syncAllExtractSelectionDOM() {
+    activePages.forEach((p) => {
+      const isSelected = selectedExtractPages.has(p.pageNum);
+      updateExtractPageCardDOM(p.pageNum, isSelected);
+    });
+  }
+
   // --- Render Page Thumbnails with PDF.js or Fallback ---
   async function renderPageThumbnails() {
     pagesGrid.innerHTML = '';
     const file = uploadedFiles[0];
     if (!file || !file.bytes) return;
+
+    if (currentThumbPdfDoc && typeof currentThumbPdfDoc.destroy === 'function') {
+      try {
+        await currentThumbPdfDoc.destroy();
+        activePdfDocs.delete(currentThumbPdfDoc);
+      } catch (e) {}
+      currentThumbPdfDoc = null;
+    }
 
     const total = activePages.length;
     let pdfDoc = null;
@@ -1352,6 +1511,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // ALWAYS pass a cloned copy to prevent worker from detaching file.bytes
         const clonedBytes = file.bytes.slice();
         pdfDoc = await window.pdfjsLib.getDocument({ data: clonedBytes }).promise;
+        currentThumbPdfDoc = trackPdfDoc(pdfDoc);
       } catch (err) {
         console.warn('PDF.js thumbnail engine unavailable, using fallback cards:', err);
         pdfDoc = null;
@@ -1383,6 +1543,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const card = document.createElement('div');
       card.className = `page-thumb-card ${pageData.isDeleted ? 'deleted' : ''} ${isSelectedRemove ? 'selected-for-remove' : ''} ${isSelectedExtract ? 'selected-for-extract' : ''}`;
       card.id = `pageCard-${i}`;
+      card.dataset.pageNum = pageData.pageNum;
 
       card.innerHTML = `
         <div class="page-canvas-wrapper" id="canvasWrapper-${i}">
@@ -1405,25 +1566,27 @@ document.addEventListener('DOMContentLoaded', () => {
         card.style.cursor = 'pointer';
         card.addEventListener('click', (e) => {
           if (e.target.closest('.icon-btn')) return;
-          if (selectedRemovePages.has(pageData.pageNum)) {
-            selectedRemovePages.delete(pageData.pageNum);
-          } else {
+          const isSelected = !selectedRemovePages.has(pageData.pageNum);
+          if (isSelected) {
             selectedRemovePages.add(pageData.pageNum);
+          } else {
+            selectedRemovePages.delete(pageData.pageNum);
           }
+          updateRemovePageCardDOM(pageData.pageNum, isSelected);
           syncRemovePagesInput();
-          renderPageThumbnails();
         });
       } else if (isExtractPages) {
         card.style.cursor = 'pointer';
         card.addEventListener('click', (e) => {
           if (e.target.closest('.icon-btn')) return;
-          if (selectedExtractPages.has(pageData.pageNum)) {
-            selectedExtractPages.delete(pageData.pageNum);
-          } else {
+          const isSelected = !selectedExtractPages.has(pageData.pageNum);
+          if (isSelected) {
             selectedExtractPages.add(pageData.pageNum);
+          } else {
+            selectedExtractPages.delete(pageData.pageNum);
           }
+          updateExtractPageCardDOM(pageData.pageNum, isSelected);
           syncExtractPagesInput();
-          renderPageThumbnails();
         });
       }
 
@@ -1819,11 +1982,33 @@ document.addEventListener('DOMContentLoaded', () => {
           </select>
         </div>
         <div class="setting-group">
-          <label for="textToPdfDirectInput">Text Content / Notes</label>
-          <textarea id="textToPdfDirectInput" rows="6" style="width:100%; border:1px solid var(--border); border-radius:6px; padding:0.5rem; font-family:monospace; font-size:0.85rem;" placeholder="Type, paste text or notes here, or upload a .txt/.md file above..."></textarea>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
+            <label for="textToPdfInput">Text Content / Notes</label>
+            <button type="button" class="secondary-btn" id="loadTextFileBtn" style="font-size: 0.75rem; padding: 2px 8px;">📂 Load Text File</button>
+            <input type="file" id="textFileInputHidden" accept=".txt,.md,text/plain,text/markdown" style="display: none;">
+          </div>
+          <textarea id="textToPdfInput" rows="8" style="width:100%; border:1px solid var(--border); border-radius:6px; padding:0.5rem; font-family:monospace; font-size:0.85rem;" placeholder="Type, paste text or notes here, or load a .txt/.md file..."></textarea>
           <span class="setting-hint">Word-wraps and paginates into clean A4 PDF pages.</span>
         </div>
       `;
+
+      setTimeout(() => {
+        const loadBtn = document.getElementById('loadTextFileBtn');
+        const fileIn = document.getElementById('textFileInputHidden');
+        if (loadBtn && fileIn) {
+          loadBtn.onclick = () => fileIn.click();
+          fileIn.onchange = (e) => {
+            if (e.target.files && e.target.files[0]) {
+              const reader = new FileReader();
+              reader.onload = (re) => {
+                const ed = document.getElementById('textToPdfInput');
+                if (ed) ed.value = re.target.result;
+              };
+              reader.readAsText(e.target.files[0]);
+            }
+          };
+        }
+      }, 50);
     } else if (currentTool === 'pdf-to-text' || currentTool === 'pdf-to-txt') {
       toolSettings.innerHTML = `
         <div class="setting-group">
@@ -1860,25 +2045,25 @@ document.addEventListener('DOMContentLoaded', () => {
         const val = input.value.trim();
         const indices = PDFCore.parsePageRanges(val, totalPages);
         selectedRemovePages = new Set(indices.map(i => i + 1));
-        renderPageThumbnails();
+        syncAllRemoveSelectionDOM();
       });
 
       document.getElementById('rmClearBtn')?.addEventListener('click', () => {
         selectedRemovePages.clear();
         syncRemovePagesInput();
-        renderPageThumbnails();
+        syncAllRemoveSelectionDOM();
       });
 
       document.getElementById('rmEvenBtn')?.addEventListener('click', () => {
         selectedRemovePages = new Set(Array.from({ length: totalPages }, (_, i) => i + 1).filter(p => p % 2 === 0));
         syncRemovePagesInput();
-        renderPageThumbnails();
+        syncAllRemoveSelectionDOM();
       });
 
       document.getElementById('rmOddBtn')?.addEventListener('click', () => {
         selectedRemovePages = new Set(Array.from({ length: totalPages }, (_, i) => i + 1).filter(p => p % 2 !== 0));
         syncRemovePagesInput();
-        renderPageThumbnails();
+        syncAllRemoveSelectionDOM();
       });
     } else if (currentTool === 'extract-pages') {
       const sorted = Array.from(selectedExtractPages).sort((a, b) => a - b);
@@ -1901,31 +2086,31 @@ document.addEventListener('DOMContentLoaded', () => {
         const val = input.value.trim();
         const indices = PDFCore.parsePageRanges(val, totalPages);
         selectedExtractPages = new Set(indices.map(i => i + 1));
-        renderPageThumbnails();
+        syncAllExtractSelectionDOM();
       });
 
       document.getElementById('extAllBtn')?.addEventListener('click', () => {
         selectedExtractPages = new Set(Array.from({ length: totalPages }, (_, i) => i + 1));
         syncExtractPagesInput();
-        renderPageThumbnails();
+        syncAllExtractSelectionDOM();
       });
 
       document.getElementById('extClearBtn')?.addEventListener('click', () => {
         selectedExtractPages.clear();
         syncExtractPagesInput();
-        renderPageThumbnails();
+        syncAllExtractSelectionDOM();
       });
 
       document.getElementById('extOddBtn')?.addEventListener('click', () => {
         selectedExtractPages = new Set(Array.from({ length: totalPages }, (_, i) => i + 1).filter(p => p % 2 !== 0));
         syncExtractPagesInput();
-        renderPageThumbnails();
+        syncAllExtractSelectionDOM();
       });
 
       document.getElementById('extEvenBtn')?.addEventListener('click', () => {
         selectedExtractPages = new Set(Array.from({ length: totalPages }, (_, i) => i + 1).filter(p => p % 2 === 0));
         syncExtractPagesInput();
-        renderPageThumbnails();
+        syncAllExtractSelectionDOM();
       });
     } else if (currentTool === 'crop' || currentTool === 'crop-pdf') {
       toolSettings.innerHTML = `
@@ -2283,43 +2468,53 @@ document.addEventListener('DOMContentLoaded', () => {
             ? 'node_modules/pdfjs-dist/build/pdf.worker.min.js'
             : 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
         }
-        const pdf = await window.pdfjsLib.getDocument({ data: new Uint8Array(srcBytes) }).promise;
-        const total = pdf.numPages;
+        let pdf = null;
+        try {
+          pdf = trackPdfDoc(await window.pdfjsLib.getDocument({ data: new Uint8Array(srcBytes) }).promise);
+          const total = pdf.numPages;
 
-        if (total === 1) {
-          const page = await pdf.getPage(1);
-          const viewport = page.getViewport({ scale });
-          const canvas = document.createElement('canvas');
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-          await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-
-          canvas.toBlob((blob) => {
-            downloadBlob(blob, `page_1.${format === 'jpeg' ? 'jpg' : 'png'}`);
-            showSuccess('Converted page 1 to image!');
-          }, format === 'jpeg' ? 'image/jpeg' : 'image/png');
-        } else {
-          if (!window.JSZip) throw new Error('ZIP library not loaded.');
-          const zip = new window.JSZip();
-
-          for (let i = 1; i <= total; i++) {
-            showStatus(`Converting page ${i} of ${total}...`, 'processing');
-            const page = await pdf.getPage(i);
+          if (total === 1) {
+            const page = await pdf.getPage(1);
             const viewport = page.getViewport({ scale });
             const canvas = document.createElement('canvas');
             canvas.width = viewport.width;
             canvas.height = viewport.height;
             await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
 
-            const blob = await new Promise((res) => canvas.toBlob(res, format === 'jpeg' ? 'image/jpeg' : 'image/png'));
-            const ext = format === 'jpeg' ? 'jpg' : 'png';
-            zip.file(`page_${i}.${ext}`, blob);
-          }
+            canvas.toBlob((blob) => {
+              downloadBlob(blob, `page_1.${format === 'jpeg' ? 'jpg' : 'png'}`);
+              showSuccess('Converted page 1 to image!');
+            }, format === 'jpeg' ? 'image/jpeg' : 'image/png');
+          } else {
+            if (!window.JSZip) throw new Error('ZIP library not loaded.');
+            const zip = new window.JSZip();
 
-          showStatus('Creating ZIP file...', 'processing');
-          const zipBlob = await zip.generateAsync({ type: 'blob' });
-          downloadBlob(zipBlob, 'pdf_images.zip');
-          showSuccess(`Successfully converted all ${total} pages into ZIP!`);
+            for (let i = 1; i <= total; i++) {
+              showStatus(`Converting page ${i} of ${total}...`, 'processing');
+              const page = await pdf.getPage(i);
+              const viewport = page.getViewport({ scale });
+              const canvas = document.createElement('canvas');
+              canvas.width = viewport.width;
+              canvas.height = viewport.height;
+              await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+
+              const blob = await new Promise((res) => canvas.toBlob(res, format === 'jpeg' ? 'image/jpeg' : 'image/png'));
+              const ext = format === 'jpeg' ? 'jpg' : 'png';
+              zip.file(`page_${i}.${ext}`, blob);
+            }
+
+            showStatus('Creating ZIP file...', 'processing');
+            const zipBlob = await zip.generateAsync({ type: 'blob' });
+            downloadBlob(zipBlob, 'pdf_images.zip');
+            showSuccess(`Successfully converted all ${total} pages into ZIP!`);
+          }
+        } finally {
+          if (pdf && typeof pdf.destroy === 'function') {
+            try {
+              await pdf.destroy();
+              activePdfDocs.delete(pdf);
+            } catch (e) {}
+          }
         }
       } else if (currentTool === 'img-to-pdf') {
         const margin = parseInt(document.getElementById('pageMarginSelect').value, 10);
@@ -2552,23 +2747,33 @@ document.addEventListener('DOMContentLoaded', () => {
         showStatus('Comparing revisions...', 'processing');
         const fileA = uploadedFiles[0].bytes.slice();
         const fileB = uploadedFiles[1].bytes.slice();
-        if (!window.pdfjsLib) throw new Error('PDF.js rendering engine is not loaded.');
-        const pdfA = await window.pdfjsLib.getDocument({ data: fileA }).promise;
-        const pdfB = await window.pdfjsLib.getDocument({ data: fileB }).promise;
-        const pageA = await pdfA.getPage(1);
-        const pageB = await pdfB.getPage(1);
-        const vpA = pageA.getViewport({ scale: 1.5 });
-        const vpB = pageB.getViewport({ scale: 1.5 });
-        const canvasA = document.createElement('canvas');
-        canvasA.width = vpA.width;
-        canvasA.height = vpA.height;
-        const canvasB = document.createElement('canvas');
-        canvasB.width = vpB.width;
-        canvasB.height = vpB.height;
-        await pageA.render({ canvasContext: canvasA.getContext('2d'), viewport: vpA }).promise;
-        await pageB.render({ canvasContext: canvasB.getContext('2d'), viewport: vpB }).promise;
-        await pdfA.destroy();
-        await pdfB.destroy();
+        let pdfA = null;
+        let pdfB = null;
+        let canvasA = null;
+        let canvasB = null;
+        try {
+          pdfA = trackPdfDoc(await window.pdfjsLib.getDocument({ data: fileA }).promise);
+          pdfB = trackPdfDoc(await window.pdfjsLib.getDocument({ data: fileB }).promise);
+          const pageA = await pdfA.getPage(1);
+          const pageB = await pdfB.getPage(1);
+          const vpA = pageA.getViewport({ scale: 1.5 });
+          const vpB = pageB.getViewport({ scale: 1.5 });
+          canvasA = document.createElement('canvas');
+          canvasA.width = vpA.width;
+          canvasA.height = vpA.height;
+          canvasB = document.createElement('canvas');
+          canvasB.width = vpB.width;
+          canvasB.height = vpB.height;
+          await pageA.render({ canvasContext: canvasA.getContext('2d'), viewport: vpA }).promise;
+          await pageB.render({ canvasContext: canvasB.getContext('2d'), viewport: vpB }).promise;
+        } finally {
+          if (pdfA && typeof pdfA.destroy === 'function') {
+            try { await pdfA.destroy(); activePdfDocs.delete(pdfA); } catch (e) {}
+          }
+          if (pdfB && typeof pdfB.destroy === 'function') {
+            try { await pdfB.destroy(); activePdfDocs.delete(pdfB); } catch (e) {}
+          }
+        }
 
         const diffCanvas = document.createElement('canvas');
         diffCanvas.width = Math.max(canvasA.width, canvasB.width);
@@ -2630,14 +2835,14 @@ document.addEventListener('DOMContentLoaded', () => {
           textContent = new TextDecoder('utf-8').decode(uploadedFiles[0].bytes);
         }
         if (!textContent.trim()) throw new Error('Please enter text or upload a text file to convert.');
-        const fontSize = parseInt(document.getElementById('txtFontSize')?.value || '12', 10);
-        const margin = parseInt(document.getElementById('txtMargin')?.value || '50', 10);
+        const fontSize = parseInt(document.getElementById('textToPdfFontSize')?.value || document.getElementById('txtFontSize')?.value || '12', 10);
+        const margin = parseInt(document.getElementById('textToPdfMargin')?.value || document.getElementById('txtMargin')?.value || '50', 10);
         const pdfBytes = await PDFCore.textToPDF(textContent, { fontSize, margin });
         downloadFile(pdfBytes, 'converted_text.pdf', 'application/pdf');
         showSuccess('Text document successfully converted to PDF!');
       } else if (currentTool === 'pdf-to-text' || currentTool === 'pdf-to-txt') {
         const srcBytes = uploadedFiles[0].bytes.slice();
-        const format = document.getElementById('txtOutputFormat')?.value || 'markdown';
+        const format = document.getElementById('pdfToTextFormat')?.value || document.getElementById('txtOutputFormat')?.value || 'markdown';
         const extractedText = await PDFCore.pdfToText(srcBytes, { format });
         const ext = format === 'markdown' ? 'md' : 'txt';
         const mime = format === 'markdown' ? 'text/markdown;charset=utf-8' : 'text/plain;charset=utf-8';
@@ -2965,8 +3170,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Initialize signature modal
   initSignatureModal();
-});
-
 
   // ============================================================================
   // Phase 3: Live Camera Scanner Subsystem
@@ -3110,3 +3313,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (modalContainer) modalContainer.style.display = 'none';
     if (scanModal) scanModal.style.display = 'none';
   }
+
+  window.openCameraScanner = openCameraScanner;
+});
