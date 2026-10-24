@@ -1,0 +1,209 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 520" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#1e1b4b" />
+    </linearGradient>
+    <linearGradient id="primaryGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#4f46e5" />
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#06b6d4" />
+      <stop offset="100%" stop-color="#3b82f6" />
+    </linearGradient>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000" flood-opacity="0.35" />
+    </filter>
+    <style>
+      @keyframes workflowLoop {
+        0%, 15% { opacity: 1; transform: scale(1); }
+        30%, 45% { opacity: 0; transform: scale(0.96); }
+        50%, 95% { opacity: 0; }
+        100% { opacity: 1; transform: scale(1); }
+      }
+      @keyframes pagesViewLoop {
+        0%, 25% { opacity: 0; transform: translateY(12px); }
+        35%, 75% { opacity: 1; transform: translateY(0); }
+        85%, 100% { opacity: 0; transform: translateY(-8px); }
+      }
+      @keyframes successLoop {
+        0%, 65% { opacity: 0; transform: translateY(8px); }
+        75%, 92% { opacity: 1; transform: translateY(0); }
+        98%, 100% { opacity: 0; }
+      }
+      @keyframes cursorMove {
+        0% { transform: translate(650px, 420px); }
+        20% { transform: translate(450px, 260px); }
+        35% { transform: translate(520px, 300px); }
+        60% { transform: translate(720px, 360px); }
+        75% { transform: translate(720px, 430px); }
+        100% { transform: translate(650px, 420px); }
+      }
+      .anim-dropzone { animation: workflowLoop 10s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+      .anim-pages { animation: pagesViewLoop 10s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+      .anim-success { animation: successLoop 10s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+      .anim-cursor { animation: cursorMove 10s ease-in-out infinite; }
+      text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    </style>
+  </defs>
+
+  <!-- Background Canvas -->
+  <rect width="900" height="520" rx="16" fill="url(#bgGrad)" />
+
+  <!-- App Window Frame -->
+  <g transform="translate(40, 30)" filter="url(#shadow)">
+    <!-- Window Outline -->
+    <rect width="820" height="460" rx="12" fill="#ffffff" stroke="#334155" stroke-opacity="0.3" stroke-width="1" />
+    
+    <!-- Titlebar -->
+    <rect width="820" height="44" rx="12" fill="#f8fafc" />
+    <rect y="32" width="820" height="12" fill="#f8fafc" />
+    <line x1="0" y1="44" x2="820" y2="44" stroke="#e2e8f0" stroke-width="1" />
+    
+    <!-- Window Dots -->
+    <circle cx="22" cy="22" r="6" fill="#ef4444" />
+    <circle cx="42" cy="22" r="6" fill="#f59e0b" />
+    <circle cx="62" cy="22" r="6" fill="#10b981" />
+
+    <!-- Window Title -->
+    <text x="410" y="27" font-size="12" font-weight="600" fill="#64748b" text-anchor="middle">PDFForge Studio • 100% Local In-Browser Processing</text>
+
+    <!-- Header / Navbar -->
+    <g transform="translate(24, 60)">
+      <!-- Brand Logo -->
+      <path d="M4 2 L18 2 L26 10 L26 28 L4 28 Z" fill="#eef2ff" stroke="#4f46e5" stroke-width="2" />
+      <polygon points="18,2 26,10 18,10" fill="#4f46e5" />
+      <path d="M11 12 L19 12 M11 16 L19 16 M11 20 L16 20" stroke="#4f46e5" stroke-width="2" stroke-linecap="round" />
+      <text x="34" y="20" font-size="18" font-weight="800" fill="#0f172a">PDF<tspan fill="#4f46e5">Forge</tspan></text>
+      <rect x="122" y="5" width="58" height="20" rx="6" fill="#4f46e5" />
+      <text x="151" y="19" font-size="10" font-weight="700" fill="#ffffff" text-anchor="middle">STUDIO</text>
+
+      <!-- Nav links -->
+      <text x="230" y="20" font-size="13" font-weight="600" fill="#475569">Organize ▾</text>
+      <text x="320" y="20" font-size="13" font-weight="600" fill="#475569">Security ▾</text>
+      <text x="405" y="20" font-size="13" font-weight="600" fill="#475569">Convert ▾</text>
+      <text x="485" y="20" font-size="13" font-weight="600" fill="#475569">Edit ▾</text>
+
+      <!-- Privacy Pill -->
+      <rect x="610" y="4" width="162" height="24" rx="12" fill="#ecfdf5" stroke="#a7f3d0" stroke-width="1" />
+      <circle cx="624" cy="16" r="4" fill="#10b981" />
+      <text x="636" y="20" font-size="11" font-weight="700" fill="#047857">Zero Server Uploads</text>
+    </g>
+
+    <line x1="24" y1="102" x2="796" y2="102" stroke="#f1f5f9" stroke-width="1" />
+
+    <!-- SCENE 1: DROPZONE -->
+    <g class="anim-dropzone" transform="translate(60, 130)">
+      <rect width="700" height="280" rx="16" fill="#f8fafc" stroke="#c7d2fe" stroke-width="2" stroke-dasharray="8 8" />
+      <g transform="translate(350, 80)">
+        <circle cx="0" cy="0" r="38" fill="#eef2ff" />
+        <path d="M-12 -6 L0 -18 L12 -6 M0 -18 L0 12" stroke="#4f46e5" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+        <path d="M-18 6 C-24 6 -28 10 -28 16 C-28 22 -22 26 -16 26 L16 26 C22 26 28 22 28 16 C28 10 24 6 18 6" fill="none" stroke="#4f46e5" stroke-width="2.5" stroke-linecap="round" />
+      </g>
+      <text x="350" y="160" font-size="18" font-weight="700" fill="#1e293b" text-anchor="middle">Select or Drop PDF files here</text>
+      <text x="350" y="185" font-size="13" fill="#64748b" text-anchor="middle">Process files directly in your browser memory • 100% Private</text>
+      
+      <!-- Browse Button -->
+      <rect x="270" y="210" width="160" height="42" rx="10" fill="url(#primaryGrad)" />
+      <text x="350" y="236" font-size="14" font-weight="700" fill="#ffffff" text-anchor="middle">Choose PDF Document</text>
+    </g>
+
+    <!-- SCENE 2: INTERACTIVE PAGE THUMBNAILS & TOOLS -->
+    <g class="anim-pages" transform="translate(40, 120)">
+      <!-- Left Panel: Page Grid -->
+      <rect width="520" height="310" rx="12" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1" />
+      <text x="24" y="32" font-size="14" font-weight="700" fill="#1e293b">Pages: annual_financials.pdf (4 Pages)</text>
+
+      <!-- Page 1 Card -->
+      <g transform="translate(24, 50)">
+        <rect width="105" height="150" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1" />
+        <!-- Miniature document lines -->
+        <rect x="15" y="18" width="50" height="8" rx="2" fill="#4f46e5" fill-opacity="0.8" />
+        <rect x="15" y="34" width="75" height="4" rx="2" fill="#cbd5e1" />
+        <rect x="15" y="44" width="75" height="4" rx="2" fill="#cbd5e1" />
+        <rect x="15" y="54" width="60" height="4" rx="2" fill="#cbd5e1" />
+        <rect x="15" y="70" width="75" height="40" rx="4" fill="#eef2ff" stroke="#c7d2fe" stroke-width="1" />
+        <text x="52" y="138" font-size="11" font-weight="700" fill="#475569" text-anchor="middle">Page 1</text>
+      </g>
+
+      <!-- Page 2 Card -->
+      <g transform="translate(145, 50)">
+        <rect width="105" height="150" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1" />
+        <rect x="15" y="18" width="60" height="6" rx="2" fill="#0284c7" />
+        <rect x="15" y="32" width="75" height="4" rx="2" fill="#cbd5e1" />
+        <rect x="15" y="42" width="75" height="4" rx="2" fill="#cbd5e1" />
+        <circle cx="52" cy="80" r="22" fill="#f0fdf4" stroke="#86efac" stroke-width="1" />
+        <text x="52" y="138" font-size="11" font-weight="700" fill="#475569" text-anchor="middle">Page 2</text>
+      </g>
+
+      <!-- Page 3 Card (Rotated 90) -->
+      <g transform="translate(266, 50)">
+        <rect width="105" height="150" rx="8" fill="#ffffff" stroke="#4f46e5" stroke-width="2" />
+        <g transform="translate(52, 75) rotate(90)">
+          <rect x="-35" y="-45" width="70" height="90" rx="4" fill="#fafafa" stroke="#cbd5e1" stroke-width="1" />
+          <rect x="-25" y="-30" width="40" height="5" rx="1" fill="#4f46e5" />
+          <rect x="-25" y="-18" width="50" height="3" rx="1" fill="#94a3b8" />
+          <rect x="-25" y="-10" width="50" height="3" rx="1" fill="#94a3b8" />
+        </g>
+        <rect x="75" y="8" width="22" height="22" rx="4" fill="#eef2ff" />
+        <text x="86" y="23" font-size="12" font-weight="700" fill="#4f46e5" text-anchor="middle">↻</text>
+        <text x="52" y="138" font-size="11" font-weight="700" fill="#4f46e5" text-anchor="middle">Page 3 (90°)</text>
+      </g>
+
+      <!-- Page 4 Card -->
+      <g transform="translate(387, 50)">
+        <rect width="105" height="150" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1" />
+        <rect x="15" y="18" width="55" height="6" rx="2" fill="#64748b" />
+        <rect x="15" y="32" width="75" height="4" rx="2" fill="#cbd5e1" />
+        <rect x="15" y="42" width="75" height="4" rx="2" fill="#cbd5e1" />
+        <rect x="15" y="52" width="50" height="4" rx="2" fill="#cbd5e1" />
+        <text x="52" y="138" font-size="11" font-weight="700" fill="#475569" text-anchor="middle">Page 4</text>
+      </g>
+
+      <!-- Bottom controls -->
+      <g transform="translate(24, 220)">
+        <rect width="130" height="34" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1" />
+        <text x="65" y="22" font-size="12" font-weight="600" fill="#334155" text-anchor="middle">↻ Rotate All CW</text>
+
+        <rect x="145" y="0" width="130" height="34" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1" />
+        <text x="210" y="22" font-size="12" font-weight="600" fill="#334155" text-anchor="middle">✂ Split Ranges</text>
+
+        <rect x="290" y="0" width="130" height="34" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1" />
+        <text x="355" y="22" font-size="12" font-weight="600" fill="#334155" text-anchor="middle">✍️ Sign Document</text>
+      </g>
+
+      <!-- Right Panel: Studio Sidebar -->
+      <g transform="translate(540, 0)">
+        <rect width="200" height="310" rx="12" fill="#ffffff" stroke="#e2e8f0" stroke-width="1" />
+        <text x="20" y="32" font-size="14" font-weight="700" fill="#0f172a">Studio Controls</text>
+        
+        <text x="20" y="65" font-size="11" font-weight="600" fill="#64748b">ACTION</text>
+        <rect x="20" y="75" width="160" height="32" rx="6" fill="#f1f5f9" />
+        <text x="30" y="96" font-size="12" font-weight="600" fill="#1e293b">Organize &amp; Rotate</text>
+
+        <text x="20" y="132" font-size="11" font-weight="600" fill="#64748b">SECURITY &amp; PRIVACY</text>
+        <rect x="20" y="142" width="160" height="32" rx="6" fill="#ecfdf5" stroke="#a7f3d0" stroke-width="1" />
+        <text x="30" y="162" font-size="11" font-weight="700" fill="#065f46">🔒 Client-Side AES</text>
+
+        <!-- Primary Action Button -->
+        <rect x="20" y="240" width="160" height="44" rx="10" fill="url(#primaryGrad)" />
+        <text x="100" y="267" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">Export PDF →</text>
+      </g>
+    </g>
+
+    <!-- SCENE 3: INSTANT COMPLETION TOAST -->
+    <g class="anim-success" transform="translate(240, 390)">
+      <rect width="340" height="46" rx="10" fill="#065f46" />
+      <circle cx="30" cy="23" r="10" fill="#10b981" />
+      <path d="M26 23 L29 26 L35 19" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+      <text x="50" y="28" font-size="13" font-weight="700" fill="#ffffff">Document Ready! Download Started.</text>
+      <text x="290" y="28" font-size="11" font-weight="600" fill="#6ee7b7">0ms Upload</text>
+    </g>
+
+    <!-- Animated Pointer Cursor -->
+    <g class="anim-cursor">
+      <polygon points="0,0 0,18 5,14 10,24 13,22 8,12 15,12" fill="#0f172a" stroke="#ffffff" stroke-width="1.5" />
+    </g>
+  </g>
+</svg>

@@ -1,7 +1,8 @@
 :root {
-  --primary: #e5322d;
-  --primary-hover: #c9221d;
-  --primary-light: #fef2f2;
+  --primary: #4f46e5;
+  --primary-hover: #4338ca;
+  --primary-light: #eef2ff;
+  --accent: #06b6d4;
   --bg-main: #f8fafc;
   --card-bg: #ffffff;
   --text-main: #1e293b;
@@ -694,7 +695,7 @@ main {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  box-shadow: 0 4px 10px rgba(229, 50, 45, 0.25);
+  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.25);
 }
 
 .primary-btn:hover {
