@@ -417,9 +417,42 @@ document.addEventListener('DOMContentLoaded', () => {
       multiple: false,
       description: 'Convert plain text notes or markdown into clean, paginated PDF documents.',
     },
+    'ai-summarizer': {
+      title: 'AI Summarizer',
+      icon: '💡',
+      actionText: 'Generate AI Summary',
+      accept: '.pdf,application/pdf',
+      acceptImages: false,
+      maxFiles: 1,
+      multiple: false,
+      description: 'Generate an executive summary, key takeaways, and stats directly in your browser with 100% privacy.',
+    },
+    'translate-pdf': {
+      title: 'Translate PDF',
+      icon: '🌐',
+      actionText: 'Translate Document',
+      accept: '.pdf,application/pdf',
+      acceptImages: false,
+      maxFiles: 1,
+      multiple: false,
+      description: 'Translate document contents into Spanish, French, German, or other languages with zero data egress.',
+    },
+    'pdf-to-markdown': {
+      title: 'PDF to Markdown',
+      icon: '📑',
+      actionText: 'Convert to Markdown',
+      accept: '.pdf,application/pdf',
+      acceptImages: false,
+      maxFiles: 1,
+      multiple: false,
+      description: 'Convert PDF pages into structured, clean Markdown (.md) headings, lists, and tables.',
+    },
   };
 
   // Aliases for hyphenated variants
+  TOOLS['summarizer'] = TOOLS['ai-summarizer'];
+  TOOLS['translate'] = TOOLS['translate-pdf'];
+  TOOLS['pdf-to-md'] = TOOLS['pdf-to-markdown'];
   TOOLS['scan'] = TOOLS['scan-to-pdf'];
   TOOLS['compress-pdf'] = TOOLS['compress'];
   TOOLS['repair-pdf'] = TOOLS['repair'];
@@ -446,6 +479,7 @@ document.addEventListener('DOMContentLoaded', () => {
     'convert-from': ['pdf-to-img', 'pdf-to-word', 'pdf-to-powerpoint', 'pdf-to-excel', 'pdf-to-pdfa', 'pdf-to-text'],
     'edit': ['rotate', 'page-numbers', 'watermark', 'edit-pdf', 'crop', 'redact', 'crop-pdf', 'forms', 'pdf-forms'],
     'security': ['unlock', 'protect', 'sign', 'compare', 'unlock-pdf', 'protect-pdf', 'sign-pdf', 'compare-pdf'],
+    'intelligence': ['ai-summarizer', 'translate-pdf', 'pdf-to-markdown', 'summarizer', 'translate', 'pdf-to-md'],
   };
 
   function updateActiveNavIndicator(toolKey) {
@@ -3067,6 +3101,39 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>
       `;
+    } else if (currentTool === 'ai-summarizer' || currentTool === 'summarizer') {
+      toolSettings.innerHTML = `
+        <div class="setting-group">
+          <label>AI Summarizer Options</label>
+          <p class="setting-hint">Generates an executive overview and key bullet takeaways directly in your browser with 100% privacy.</p>
+        </div>
+        <div class="setting-group" style="margin-top: 0.75rem;">
+          <label>Summary Type</label>
+          <div style="font-size: 0.85rem; background: #f8fafc; padding: 0.6rem; border-radius: var(--radius-sm); border: 1px solid var(--border);">
+            Executive Summary &bull; Key Takeaways &bull; Document Reading Stats
+          </div>
+        </div>
+      `;
+    } else if (currentTool === 'translate-pdf' || currentTool === 'translate') {
+      toolSettings.innerHTML = `
+        <div class="setting-group">
+          <label for="translateLangSelect">Target Language</label>
+          <select id="translateLangSelect" class="form-select">
+            <option value="es" selected>Spanish (Español)</option>
+            <option value="fr">French (Français)</option>
+            <option value="de">German (Deutsch)</option>
+            <option value="it">Italian (Italiano)</option>
+          </select>
+          <p class="setting-hint">100% private in-browser document translation without external server uploads.</p>
+        </div>
+      `;
+    } else if (currentTool === 'pdf-to-markdown' || currentTool === 'pdf-to-md') {
+      toolSettings.innerHTML = `
+        <div class="setting-group">
+          <label>Markdown Formatting</label>
+          <p class="setting-hint">Extracts structured headers (#, ##), lists, and table data into an editable .md document.</p>
+        </div>
+      `;
     }
   }
 
@@ -3621,6 +3688,28 @@ document.addEventListener('DOMContentLoaded', () => {
         const pdfaBytes = await PDFCore.pdfToPdfA(srcBytes);
         downloadFile(pdfaBytes, 'archived_document_pdfa.pdf', 'application/pdf');
         showSuccess('Document converted to ISO-standardized PDF/A-1b!');
+      } else if (currentTool === 'ai-summarizer' || currentTool === 'summarizer') {
+        if (uploadedFiles.length === 0) throw new Error('Please select a PDF document to summarize.');
+        const srcBytes = uploadedFiles[0].bytes.slice();
+        showStatus('Analyzing document and generating executive summary...', 'processing');
+        const summaryMd = await PDFCore.summarizePDF(srcBytes);
+        downloadBlob(new Blob([summaryMd], { type: 'text/markdown;charset=utf-8' }), 'ai_document_summary.md');
+        showSuccess('AI Summary generated successfully!');
+      } else if (currentTool === 'translate-pdf' || currentTool === 'translate') {
+        if (uploadedFiles.length === 0) throw new Error('Please select a PDF document to translate.');
+        const srcBytes = uploadedFiles[0].bytes.slice();
+        const targetLang = document.getElementById('translateLangSelect')?.value || 'es';
+        showStatus(`Translating document to ${targetLang.toUpperCase()}...`, 'processing');
+        const translatedMd = await PDFCore.translatePDF(srcBytes, { targetLang });
+        downloadBlob(new Blob([translatedMd], { type: 'text/markdown;charset=utf-8' }), `translated_${targetLang}.md`);
+        showSuccess('Document translated successfully!');
+      } else if (currentTool === 'pdf-to-markdown' || currentTool === 'pdf-to-md') {
+        if (uploadedFiles.length === 0) throw new Error('Please select a PDF document to convert.');
+        const srcBytes = uploadedFiles[0].bytes.slice();
+        showStatus('Extracting markdown structure...', 'processing');
+        const markdown = await PDFCore.pdfToMarkdown(srcBytes);
+        downloadBlob(new Blob([markdown], { type: 'text/markdown;charset=utf-8' }), 'document.md');
+        showSuccess('PDF converted to Markdown (.md) successfully!');
       }
     } catch (err) {
       console.error(err);

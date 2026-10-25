@@ -494,6 +494,7 @@ async function runAuditSuite() {
     'convert-from',
     'edit',
     'security',
+    'intelligence',
   ];
 
   await runTest('AUDIT', '5.1', 'All 30 tools are present in TOOLS registry in app.js', async () => {

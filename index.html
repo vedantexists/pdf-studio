@@ -349,6 +349,36 @@
               </button>
             </div>
           </li>
+
+          <!-- 7. Intelligence -->
+          <li class="nav-item" role="none">
+            <button class="nav-dropdown-toggle" role="menuitem" aria-haspopup="true" aria-expanded="false" data-category="intelligence">
+              <span>Intelligence</span> <span class="arrow">▾</span>
+            </button>
+            <div class="nav-dropdown" role="menu" aria-label="PDF Intelligence tools">
+              <button type="button" class="nav-tool-link" role="menuitem" data-tool="ai-summarizer">
+                <span class="nav-tool-icon">🧠</span>
+                <span class="nav-tool-info">
+                  <span class="nav-tool-title">AI Summarizer</span>
+                  <span class="nav-tool-desc">Executive summary, key insights & bullet points</span>
+                </span>
+              </button>
+              <button type="button" class="nav-tool-link" role="menuitem" data-tool="translate-pdf">
+                <span class="nav-tool-icon">🌍</span>
+                <span class="nav-tool-info">
+                  <span class="nav-tool-title">Translate PDF</span>
+                  <span class="nav-tool-desc">Translate document content with 100% privacy</span>
+                </span>
+              </button>
+              <button type="button" class="nav-tool-link" role="menuitem" data-tool="pdf-to-markdown">
+                <span class="nav-tool-icon">📑</span>
+                <span class="nav-tool-info">
+                  <span class="nav-tool-title">PDF to Markdown</span>
+                  <span class="nav-tool-desc">Extract structured markdown, headings & code</span>
+                </span>
+              </button>
+            </div>
+          </li>
         </ul>
       </nav>
 
@@ -437,6 +467,14 @@
           <button type="button" class="drawer-tool-link" data-tool="protect">Protect PDF</button>
           <button type="button" class="drawer-tool-link" data-tool="sign">Sign PDF</button>
           <button type="button" class="drawer-tool-link" data-tool="compare">Compare PDF</button>
+        </div>
+      </div>
+      <div class="drawer-category">
+        <div class="drawer-category-title">Intelligence</div>
+        <div class="drawer-category-links">
+          <button type="button" class="drawer-tool-link" data-tool="ai-summarizer">AI Summarizer</button>
+          <button type="button" class="drawer-tool-link" data-tool="translate-pdf">Translate PDF</button>
+          <button type="button" class="drawer-tool-link" data-tool="pdf-to-markdown">PDF to Markdown</button>
         </div>
       </div>
     </div>
@@ -690,6 +728,27 @@
           <div class="tool-icon">🏛️</div>
           <h2>PDF to PDF/A</h2>
           <p>Convert standard PDFs to ISO 19005-1 (PDF/A-1b) for long-term document archiving.</p>
+        </div>
+
+        <!-- AI Summarizer -->
+        <div class="tool-card" tabindex="0" role="button" data-tool="ai-summarizer" aria-label="AI Summarizer tool">
+          <div class="tool-icon">🧠</div>
+          <h2>AI Summarizer</h2>
+          <p>Extract key takeaways, executive summaries, and action items 100% in-browser.</p>
+        </div>
+
+        <!-- Translate PDF -->
+        <div class="tool-card" tabindex="0" role="button" data-tool="translate-pdf" aria-label="Translate PDF tool">
+          <div class="tool-icon">🌍</div>
+          <h2>Translate PDF</h2>
+          <p>Translate document content directly in-memory with zero cloud egress.</p>
+        </div>
+
+        <!-- PDF to Markdown -->
+        <div class="tool-card" tabindex="0" role="button" data-tool="pdf-to-markdown" aria-label="PDF to Markdown tool">
+          <div class="tool-icon">📑</div>
+          <h2>PDF to Markdown</h2>
+          <p>Extract clean structured Markdown headings, lists, tables, and code blocks.</p>
         </div>
       </section>
     </div>

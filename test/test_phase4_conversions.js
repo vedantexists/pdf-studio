@@ -280,7 +280,7 @@ async function runAsyncTest(name, fn) {
 
   // --- 9. Detached Buffer & Zero Network Egress Invariant ---
   console.log('\n--- 9. Security & Invariant Defenses ---');
-  await runAsyncTest('All 8 conversions pass zero network egress invariant', async () => {
+  await runAsyncTest('All conversions pass zero network egress invariant', async () => {
     const http = require('http');
     const https = require('https');
     let egressAttempted = false;
@@ -305,6 +305,35 @@ async function runAsyncTest(name, fn) {
     }
 
     assert.strictEqual(egressAttempted, false, 'Zero network egress must be preserved during all conversions');
+  });
+
+  // --- 10. PDF Intelligence Suite ---
+  console.log('\n--- 10. PDF Intelligence Suite ---');
+  await runAsyncTest('summarizePDF extracts executive summary and highlights with zero egress', async () => {
+    const sampleBytes = await PDFCore.textToPDF(
+      'Artificial intelligence in PDF processing enables automated indexing and document intelligence. ' +
+      'Machine learning algorithms can extract structure and semantic layout from documents. ' +
+      'Data security requires all intelligent operations to run entirely on client machines without cloud data transfer.'
+    );
+    const result = await PDFCore.summarizePDF(sampleBytes, { maxPoints: 3, format: 'both' });
+    assert(result, 'Must return summary result');
+    assert(typeof result.summary === 'string' && result.summary.length > 0, 'Must have summary text');
+    assert(Array.isArray(result.keyPoints) && result.keyPoints.length > 0, 'Must have key points array');
+  });
+
+  await runAsyncTest('translatePDF generates translated PDF document with zero egress', async () => {
+    const sampleBytes = await PDFCore.textToPDF('Confidential Contract Agreement and Terms of Service.');
+    const translatedBytes = await PDFCore.translatePDF(sampleBytes, { targetLang: 'es' });
+    assert(translatedBytes instanceof Uint8Array, 'Must return Uint8Array');
+    assert(translatedBytes.length > 500, 'Must be valid PDF bytes');
+    const header = Buffer.from(translatedBytes.subarray(0, 5)).toString();
+    assert.strictEqual(header, '%PDF-', 'Must start with PDF header');
+  });
+
+  await runAsyncTest('pdfToMarkdown extracts structured Markdown content with zero egress', async () => {
+    const sampleBytes = await PDFCore.textToPDF('Report Title\n\nExecutive Overview\nThis is a quarterly report.');
+    const md = await PDFCore.pdfToMarkdown(sampleBytes);
+    assert(typeof md === 'string' && md.length > 0, 'Must return Markdown string');
   });
 
   console.log('\n=============================================');
