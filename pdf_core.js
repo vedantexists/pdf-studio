@@ -94,7 +94,7 @@
 
   let PDFDocument, rgb, degrees, StandardFonts, PDFName, PDFHexString,
       PDFTextField, PDFCheckBox, PDFDropdown, PDFRadioGroup, PDFOptionList,
-      PDFArray, PDFRef, decodePDFRawStream;
+      PDFArray, PDFRef, PDFDict, PDFStream, PDFRawStream, decodePDFRawStream;
 
   function initPDFLibSymbols() {
     if (!PDFLib) PDFLib = resolvePDFLib();
@@ -118,6 +118,9 @@
       PDFOptionList = PDFLib.PDFOptionList;
       PDFArray = PDFLib.PDFArray;
       PDFRef = PDFLib.PDFRef;
+      PDFDict = PDFLib.PDFDict;
+      PDFStream = PDFLib.PDFStream;
+      PDFRawStream = PDFLib.PDFRawStream;
       decodePDFRawStream = PDFLib.decodePDFRawStream;
     }
   }
@@ -959,10 +962,23 @@
       doc.setCreator('PDF Studio');
     }
 
+    // Helper: CMYK to RGB integer conversion
+    function cmykToRgb(c, m, y, k) {
+      const r = Math.round(((255 - c) * (255 - k)) / 255);
+      const g = Math.round(((255 - m) * (255 - k)) / 255);
+      const b = Math.round(((255 - y) * (255 - k)) / 255);
+      return [r, g, b];
+    }
+
     // Inspect indirect objects for image XObjects and downsample their streams
     const zlibMod = (typeof require !== 'undefined') ? require('zlib') : null;
+    const processedRefs = new Set();
+
     if (zlibMod) {
       for (const [ref, obj] of doc.context.enumerateIndirectObjects()) {
+        const refKey = ref.tag || (ref.objectNumber + ' ' + ref.generationNumber + ' R');
+        if (processedRefs.has(refKey)) continue;
+
         if (obj instanceof PDFLib.PDFRawStream) {
           const dict = obj.dict;
           const subtype = dict.get(PDFName.of('Subtype'));
@@ -970,9 +986,8 @@
             const wObj = dict.get(PDFName.of('Width'));
             const hObj = dict.get(PDFName.of('Height'));
             const filter = dict.get(PDFName.of('Filter'));
-            if (!filter || !filter.toString().includes('FlateDecode')) {
-              continue;
-            }
+            if (!filter || !filter.toString().includes('FlateDecode')) continue;
+
             if (wObj && hObj && typeof wObj.asNumber === 'function' && typeof hObj.asNumber === 'function') {
               const width = wObj.asNumber();
               const height = hObj.asNumber();
@@ -980,21 +995,37 @@
                 try {
                   const rawContents = obj.getContents();
                   const decompressed = zlibMod.inflateSync(rawContents);
-                  
-                  const channels = decompressed.length >= width * height * 4 ? 4 : (decompressed.length >= width * height * 3 ? 3 : 1);
+                  const csObj = dict.get(PDFName.of('ColorSpace'));
+                  const csStr = csObj ? csObj.toString() : '';
+                  const isCMYK = csStr.includes('CMYK') || (decompressed.length >= width * height * 4 && !csStr.includes('RGB'));
+                  const channels = isCMYK ? 4 : (decompressed.length >= width * height * 4 ? 4 : (decompressed.length >= width * height * 3 ? 3 : 1));
+
                   const scaleDiv = level === 'extreme' ? 3 : 2;
                   const newW = Math.max(1, Math.floor(width / scaleDiv));
                   const newH = Math.max(1, Math.floor(height / scaleDiv));
-                  const newBuffer = Buffer.alloc(newW * newH * channels);
+                  const outChannels = isCMYK ? 3 : channels;
+                  const newBuffer = Buffer.alloc(newW * newH * outChannels);
 
                   for (let ny = 0; ny < newH; ny++) {
                     const sy = Math.min(height - 1, ny * scaleDiv);
                     for (let nx = 0; nx < newW; nx++) {
                       const sx = Math.min(width - 1, nx * scaleDiv);
                       const sIdx = (sy * width + sx) * channels;
-                      const dIdx = (ny * newW + nx) * channels;
-                      for (let c = 0; c < channels; c++) {
-                        newBuffer[dIdx + c] = decompressed[sIdx + c] || 0;
+                      const dIdx = (ny * newW + nx) * outChannels;
+                      if (isCMYK) {
+                        const [r, g, b] = cmykToRgb(
+                          decompressed[sIdx],
+                          decompressed[sIdx + 1],
+                          decompressed[sIdx + 2],
+                          decompressed[sIdx + 3]
+                        );
+                        newBuffer[dIdx] = r;
+                        newBuffer[dIdx + 1] = g;
+                        newBuffer[dIdx + 2] = b;
+                      } else {
+                        for (let c = 0; c < channels; c++) {
+                          newBuffer[dIdx + c] = decompressed[sIdx + c] || 0;
+                        }
                       }
                     }
                   }
@@ -1005,6 +1036,9 @@
                     dict.set(PDFName.of('Height'), doc.context.obj(newH));
                     dict.set(PDFName.of('Filter'), PDFName.of('FlateDecode'));
                     dict.set(PDFName.of('Length'), doc.context.obj(recompressed.length));
+                    if (isCMYK) {
+                      dict.set(PDFName.of('ColorSpace'), PDFName.of('DeviceRGB'));
+                    }
                     const newStream = PDFLib.PDFRawStream.of(dict, recompressed);
                     doc.context.assign(ref, newStream);
                   }
@@ -1017,8 +1051,11 @@
         }
       }
     } else if (typeof OffscreenCanvas !== 'undefined' || (typeof document !== 'undefined' && document.createElement)) {
-      // In-browser downsampling via OffscreenCanvas / HTML5 Canvas with JPEG re-encoding
+      // In-browser downsampling via OffscreenCanvas / HTML5 Canvas with JPEG or PNG re-encoding
       for (const [ref, obj] of doc.context.enumerateIndirectObjects()) {
+        const refKey = ref.tag || (ref.objectNumber + ' ' + ref.generationNumber + ' R');
+        if (processedRefs.has(refKey)) continue;
+
         if (obj instanceof PDFLib.PDFRawStream) {
           const dict = obj.dict;
           const subtype = dict.get(PDFName.of('Subtype'));
@@ -1030,9 +1067,16 @@
             if (!rawContents || rawContents.length === 0) continue;
 
             const isJpeg = filter && filter.toString().includes('DCTDecode');
+            const csObj = dict.get(PDFName.of('ColorSpace'));
+            const csStr = csObj ? csObj.toString() : '';
+            const smaskRef = dict.get(PDFName.of('SMask'));
+
             try {
               let bitmap = null;
-              if (isJpeg && typeof createImageBitmap === 'function') {
+              let hasAlpha = !!smaskRef;
+
+              // Only use createImageBitmap directly if it is JPEG without CMYK or SMask
+              if (isJpeg && typeof createImageBitmap === 'function' && !csStr.includes('CMYK') && !smaskRef) {
                 const blob = new Blob([rawContents], { type: 'image/jpeg' });
                 bitmap = await createImageBitmap(blob);
               } else if (decodePDFRawStream && typeof OffscreenCanvas !== 'undefined') {
@@ -1040,29 +1084,60 @@
                 const height = (hObj && typeof hObj.asNumber === 'function') ? hObj.asNumber() : 0;
                 if (width > 0 && height > 0) {
                   const decompressed = decodePDFRawStream(obj).decode();
-                  const channels = decompressed.length >= width * height * 4 ? 4 : (decompressed.length >= width * height * 3 ? 3 : 1);
+                  const isCMYK = csStr.includes('CMYK') || (decompressed.length >= width * height * 4 && !csStr.includes('RGB'));
+                  const channels = isCMYK ? 4 : (decompressed.length >= width * height * 4 ? 4 : (decompressed.length >= width * height * 3 ? 3 : 1));
+
+                  // If SMask exists, decode it to extract true alpha values
+                  let smaskBytes = null;
+                  if (smaskRef instanceof PDFLib.PDFRef) {
+                    const smaskObj = doc.context.lookup(smaskRef);
+                    if (smaskObj && smaskObj instanceof PDFLib.PDFRawStream) {
+                      try {
+                        smaskBytes = decodePDFRawStream(smaskObj).decode();
+                        processedRefs.add(smaskRef.tag || (smaskRef.objectNumber + ' ' + smaskRef.generationNumber + ' R'));
+                        hasAlpha = true;
+                      } catch (e) {
+                        // ignore SMask decode failure
+                      }
+                    }
+                  }
+
                   const srcCanvas = new OffscreenCanvas(width, height);
                   const srcCtx = srcCanvas.getContext('2d');
                   const imgData = srcCtx.createImageData(width, height);
+
                   for (let i = 0; i < width * height; i++) {
                     const sIdx = i * channels;
                     const dIdx = i * 4;
-                    if (channels === 4) {
-                      imgData.data[dIdx] = decompressed[sIdx];
-                      imgData.data[dIdx + 1] = decompressed[sIdx + 1];
-                      imgData.data[dIdx + 2] = decompressed[sIdx + 2];
-                      imgData.data[dIdx + 3] = decompressed[sIdx + 3];
+                    if (isCMYK) {
+                      const [r, g, b] = cmykToRgb(
+                        decompressed[sIdx],
+                        decompressed[sIdx + 1],
+                        decompressed[sIdx + 2],
+                        decompressed[sIdx + 3]
+                      );
+                      imgData.data[dIdx] = r;
+                      imgData.data[dIdx + 1] = g;
+                      imgData.data[dIdx + 2] = b;
+                      imgData.data[dIdx + 3] = (smaskBytes && smaskBytes[i] !== undefined) ? smaskBytes[i] : 255;
                     } else if (channels === 3) {
                       imgData.data[dIdx] = decompressed[sIdx];
                       imgData.data[dIdx + 1] = decompressed[sIdx + 1];
                       imgData.data[dIdx + 2] = decompressed[sIdx + 2];
-                      imgData.data[dIdx + 3] = 255;
+                      imgData.data[dIdx + 3] = (smaskBytes && smaskBytes[i] !== undefined) ? smaskBytes[i] : 255;
+                    } else if (channels === 4) {
+                      imgData.data[dIdx] = decompressed[sIdx];
+                      imgData.data[dIdx + 1] = decompressed[sIdx + 1];
+                      imgData.data[dIdx + 2] = decompressed[sIdx + 2];
+                      const aVal = decompressed[sIdx + 3];
+                      imgData.data[dIdx + 3] = aVal;
+                      if (aVal < 255) hasAlpha = true;
                     } else {
                       const v = decompressed[sIdx];
                       imgData.data[dIdx] = v;
                       imgData.data[dIdx + 1] = v;
                       imgData.data[dIdx + 2] = v;
-                      imgData.data[dIdx + 3] = 255;
+                      imgData.data[dIdx + 3] = (smaskBytes && smaskBytes[i] !== undefined) ? smaskBytes[i] : 255;
                     }
                   }
                   srcCtx.putImageData(imgData, 0, 0);
@@ -1087,10 +1162,14 @@
 
                 let downsampledBytes = null;
                 if (typeof canvas.convertToBlob === 'function') {
-                  const outBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality });
+                  const outBlob = hasAlpha
+                    ? await canvas.convertToBlob({ type: 'image/png' })
+                    : await canvas.convertToBlob({ type: 'image/jpeg', quality });
                   downsampledBytes = new Uint8Array(await outBlob.arrayBuffer());
                 } else if (typeof canvas.toDataURL === 'function') {
-                  const dataUrl = canvas.toDataURL('image/jpeg', quality);
+                  const dataUrl = hasAlpha
+                    ? canvas.toDataURL('image/png')
+                    : canvas.toDataURL('image/jpeg', quality);
                   const base64 = dataUrl.split(',')[1];
                   const bin = atob(base64);
                   downsampledBytes = new Uint8Array(bin.length);
@@ -1098,10 +1177,20 @@
                 }
 
                 if (downsampledBytes && downsampledBytes.length < rawContents.length) {
-                  const newImg = await doc.embedJpg(downsampledBytes);
+                  const newImg = hasAlpha
+                    ? await doc.embedPng(downsampledBytes)
+                    : await doc.embedJpg(downsampledBytes);
                   await newImg.embed();
                   const newStream = doc.context.lookup(newImg.ref);
                   doc.context.assign(ref, newStream);
+
+                  // Eliminate orphan duplicate object created by embed
+                  doc.context.delete(newImg.ref);
+
+                  // Eliminate old SMask if replaced
+                  if (smaskRef instanceof PDFLib.PDFRef) {
+                    doc.context.delete(smaskRef);
+                  }
                 }
               }
             } catch (err) {
@@ -1110,6 +1199,61 @@
           }
         }
       }
+    }
+
+    // Eliminate unreferenced orphan image stream objects across document
+    try {
+      const reachableRefs = new Set();
+      const queue = [];
+      if (doc.catalog) {
+        const catRef = doc.context.getObjectRef(doc.catalog) || doc.context.trailerInfo?.Root;
+        if (catRef) queue.push(catRef);
+      }
+      for (let i = 0; i < doc.getPageCount(); i++) {
+        const page = doc.getPage(i);
+        if (page.ref) queue.push(page.ref);
+      }
+
+      function traverseObj(item) {
+        if (!item) return;
+        if (item instanceof PDFLib.PDFRef) {
+          const key = item.tag || (item.objectNumber + ' ' + item.generationNumber + ' R');
+          if (!reachableRefs.has(key)) queue.push(item);
+        } else if (item instanceof PDFLib.PDFDict || (item.dict && item.dict instanceof Map)) {
+          const entries = item.entries ? item.entries() : (item.dict ? item.dict.entries() : []);
+          for (const [, v] of entries) traverseObj(v);
+        } else if (item instanceof PDFLib.PDFStream) {
+          if (item.dict) traverseObj(item.dict);
+        } else if (item instanceof PDFLib.PDFArray || Array.isArray(item.array)) {
+          const arr = item.asArray ? item.asArray() : (item.array || []);
+          for (const el of arr) traverseObj(el);
+        } else if (item instanceof Map) {
+          for (const [, v] of item) traverseObj(v);
+        }
+      }
+
+      while (queue.length > 0) {
+        const r = queue.pop();
+        const rKey = r.tag || (r.objectNumber + ' ' + r.generationNumber + ' R');
+        if (reachableRefs.has(rKey)) continue;
+        reachableRefs.add(rKey);
+
+        const target = doc.context.lookup(r);
+        if (!target) continue;
+        traverseObj(target);
+      }
+
+      for (const [r, o] of doc.context.enumerateIndirectObjects()) {
+        if (o instanceof PDFLib.PDFRawStream) {
+          const subtype = o.dict?.get(PDFName.of('Subtype'))?.toString();
+          const rKey = r.tag || (r.objectNumber + ' ' + r.generationNumber + ' R');
+          if (subtype === '/Image' && !reachableRefs.has(rKey)) {
+            doc.context.delete(r);
+          }
+        }
+      }
+    } catch (e) {
+      // Invariant: orphan elimination failure must never crash document compression
     }
 
     return await doc.save({
@@ -1130,30 +1274,73 @@
     if (!pdfBytes) throw new Error('PDF bytes are required to repair.');
     let bytes = pdfBytes instanceof Uint8Array ? pdfBytes.slice() : new Uint8Array(pdfBytes);
 
-    const tailSlice = bytes.slice(Math.max(0, bytes.length - 1500));
+    const tailSlice = bytes.slice(Math.max(0, bytes.length - 2048));
     const tailStr = latin1Decoder.decode(tailSlice);
 
-    const hasValidTrailer = tailStr.includes('trailer') && tailStr.includes('startxref') && tailStr.includes('%%EOF');
+    // Modern PDF 1.5+ cross-reference streams (/Type /XRef) omit the literal 'trailer' keyword
+    let hasXRefStream = /\/Type\s*\/XRef/.test(tailStr);
+    if (!hasXRefStream && tailStr.includes('startxref')) {
+      const sxMatch = tailStr.match(/startxref\s+(\d+)/);
+      if (sxMatch) {
+        const sxOff = parseInt(sxMatch[1], 10);
+        if (sxOff >= 0 && sxOff < bytes.length) {
+          const header = latin1Decoder.decode(bytes.slice(sxOff, Math.min(bytes.length, sxOff + 256)));
+          if (/\/Type\s*\/XRef/.test(header)) hasXRefStream = true;
+        }
+      }
+    }
+
+    let useObjStreams = hasXRefStream;
+    const hasValidTrailer = (tailStr.includes('trailer') || hasXRefStream) && tailStr.includes('startxref') && tailStr.includes('%%EOF');
     if (!hasValidTrailer || tailStr.lastIndexOf('startxref') < tailStr.lastIndexOf('endobj')) {
+      useObjStreams = false;
       const fullStr = latin1Decoder.decode(bytes);
 
-      // Mask stream bodies with spaces of identical character length so raw binary does not match false positive XRef objects
-      const cleanStr = fullStr.replace(
-        /(stream\r?\n)([\s\S]*?)(\r?\nendstream)/g,
-        (match, p1, p2, p3) => p1 + ' '.repeat(p2.length) + p3
-      );
+      // Collect non-stream slice indices so raw stream binary does not match false positive XRef objects
+      // Avoids allocating repeating space strings (' '.repeat(length)) across large stream bodies
+      const streamMarker = /stream\r?\n/g;
+      const endstreamMarker = /\r?\nendstream/g;
+      const nonStreamSlices = [];
+      let lastEnd = 0;
+      let smMatch;
 
-      const rootMatch = cleanStr.match(/\/Root\s+(\d+)\s+(\d+)\s+R/);
+      while ((smMatch = streamMarker.exec(fullStr)) !== null) {
+        endstreamMarker.lastIndex = streamMarker.lastIndex;
+        const esMatch = endstreamMarker.exec(fullStr);
+        if (!esMatch) break;
+        if (smMatch.index > lastEnd) {
+          nonStreamSlices.push({ start: lastEnd, end: smMatch.index });
+        }
+        lastEnd = endstreamMarker.lastIndex;
+        streamMarker.lastIndex = lastEnd;
+      }
+      if (lastEnd < fullStr.length) {
+        nonStreamSlices.push({ start: lastEnd, end: fullStr.length });
+      }
+
       const objRegex = /(\d+)\s+(\d+)\s+obj/g;
       const xrefEntries = {};
-      let match;
       let maxObjNum = 0;
+      let rootMatch = null;
+      let catalogMatch = null;
 
-      while ((match = objRegex.exec(cleanStr)) !== null) {
-        const objNum = parseInt(match[1], 10);
-        const genNum = parseInt(match[2], 10);
-        xrefEntries[objNum] = { offset: match.index, genNum };
-        if (objNum > maxObjNum) maxObjNum = objNum;
+      for (const slice of nonStreamSlices) {
+        const sliceText = fullStr.slice(slice.start, slice.end);
+        let match;
+        while ((match = objRegex.exec(sliceText)) !== null) {
+          const objNum = parseInt(match[1], 10);
+          const genNum = parseInt(match[2], 10);
+          xrefEntries[objNum] = { offset: slice.start + match.index, genNum };
+          if (objNum > maxObjNum) maxObjNum = objNum;
+        }
+        if (!rootMatch) {
+          const rm = sliceText.match(/\/Root\s+(\d+)\s+(\d+)\s+R/);
+          if (rm) rootMatch = rm;
+        }
+        if (!catalogMatch) {
+          const cm = sliceText.match(/(\d+)\s+(\d+)\s+obj(?:(?!endobj)[\s\S])*?\/Type\s*\/Catalog/);
+          if (cm) catalogMatch = cm;
+        }
       }
 
       if (maxObjNum > 0) {
@@ -1172,13 +1359,10 @@
         let rootRef = null;
         if (rootMatch) {
           rootRef = rootMatch[1] + ' ' + rootMatch[2] + ' R';
+        } else if (catalogMatch) {
+          rootRef = catalogMatch[1] + ' ' + catalogMatch[2] + ' R';
         } else {
-          const catalogMatch = cleanStr.match(/(\d+)\s+(\d+)\s+obj(?:(?!endobj)[\s\S])*?\/Type\s*\/Catalog/);
-          if (catalogMatch) {
-            rootRef = catalogMatch[1] + ' ' + catalogMatch[2] + ' R';
-          } else {
-            rootRef = '1 0 R';
-          }
+          rootRef = '1 0 R';
         }
         const trailer = 'trailer\n<<\n  /Size ' + size + '\n  /Root ' + rootRef + '\n>>\nstartxref\n';
 
@@ -1200,13 +1384,27 @@
       }
     }
 
-    return await doc.save({ useObjectStreams: false });
+    return await doc.save({ useObjectStreams: useObjStreams });
+  }
+
+  /**
+   * Multiply two 2D affine transformation matrices [a, b, c, d, e, f].
+   */
+  function multiplyMatrix(m1, m2) {
+    return [
+      m1[0] * m2[0] + m1[1] * m2[2],
+      m1[0] * m2[1] + m1[1] * m2[3],
+      m1[2] * m2[0] + m1[3] * m2[2],
+      m1[2] * m2[1] + m1[3] * m2[3],
+      m1[4] * m2[0] + m1[5] * m2[2] + m2[4],
+      m1[4] * m2[1] + m1[5] * m2[3] + m2[5],
+    ];
   }
 
   /**
    * Helper to parse and strip text operator tokens (Tj, TJ, ', \") intersecting redaction bounding boxes.
    */
-  function sanitizeContentStream(streamStr, redactBoxes) {
+  function sanitizeContentStream(streamStr, redactBoxes, initialCtm = [1, 0, 0, 1, 0, 0], doMap = null) {
     if (!redactBoxes || redactBoxes.length === 0) return streamStr;
 
     function tokenize(str) {
@@ -1290,7 +1488,7 @@
     const outTokens = [];
     const stack = [];
     const gsStack = [];
-    let ctm = [1, 0, 0, 1, 0, 0];
+    let ctm = [...initialCtm];
     let inBT = false;
     let tm = [1, 0, 0, 1, 0, 0];
     let tlm = [1, 0, 0, 1, 0, 0];
@@ -1357,6 +1555,18 @@
           if (stack.length >= 6) {
             const m = stack.slice(-6).map((t) => parseFloat(t.raw) || 0);
             ctm = multiplyMatrix(m, ctm);
+          }
+          for (const t of stack) outTokens.push(t.raw);
+          outTokens.push(tok.raw);
+          stack.length = 0;
+          continue;
+        }
+        if (op === 'Do') {
+          if (stack.length > 0 && doMap) {
+            const nameTok = stack[stack.length - 1];
+            const xName = nameTok.raw.replace(/^\//, '');
+            if (!doMap.has(xName)) doMap.set(xName, []);
+            doMap.get(xName).push([...ctm]);
           }
           for (const t of stack) outTokens.push(t.raw);
           outTokens.push(tok.raw);
@@ -1596,60 +1806,337 @@
       boxesByPage.get(pIdx).push({ ...box, pageIndex: pIdx, x, y, width, height });
     }
 
-    for (const [pIdx, pageBoxes] of boxesByPage.entries()) {
-      const page = pages[pIdx];
-      const rawContents = page.node.get(PDFName.of('Contents'));
-      if (!rawContents) continue;
+    function sanitizeFormXObjects(resourcesDict, pageBoxes, parentCtm = [1, 0, 0, 1, 0, 0], doMap = null, visitedRefs = new Set()) {
+      if (!resourcesDict || !pageBoxes || pageBoxes.length === 0) return;
+      const res = resourcesDict instanceof PDFRef ? doc.context.lookup(resourcesDict) : resourcesDict;
+      if (!res || !(res instanceof PDFDict)) return;
 
-      const items = rawContents instanceof PDFArray ? rawContents.asArray() : [rawContents];
-      for (const item of items) {
-        let streamObj;
-        let targetRef = null;
-        if (item instanceof PDFRef) {
-          targetRef = item;
-          streamObj = doc.context.lookup(item);
-        } else {
-          streamObj = item;
+      const xobjEntry = res.get(PDFName.of('XObject'));
+      const xobjects = xobjEntry instanceof PDFRef ? doc.context.lookup(xobjEntry) : xobjEntry;
+      if (!xobjects || !(xobjects instanceof PDFDict)) return;
+
+      const entries = xobjects.entries ? xobjects.entries() : Array.from(xobjects.dict.entries());
+      for (const [key, refOrStream] of entries) {
+        if (refOrStream instanceof PDFRef) {
+          if (visitedRefs.has(refOrStream)) continue;
+          visitedRefs.add(refOrStream);
         }
-        if (!streamObj) continue;
+        const streamObj = refOrStream instanceof PDFRef ? doc.context.lookup(refOrStream) : refOrStream;
+        if (!streamObj || !streamObj.dict) continue;
 
-        let rawBytes;
-        if (typeof decodePDFRawStream === 'function') {
-          try {
-            rawBytes = decodePDFRawStream(streamObj).decode();
-          } catch (e) {
-            if (typeof streamObj.getContents === 'function') {
-              rawBytes = streamObj.getContents();
+        const subtype = streamObj.dict.get(PDFName.of('Subtype'));
+        if (subtype?.encodedName !== '/Form' && subtype?.toString() !== '/Form') continue;
+
+        let formMatrix = [1, 0, 0, 1, 0, 0];
+        const matrixEntry = streamObj.dict.get(PDFName.of('Matrix'));
+        const matrixArr = matrixEntry instanceof PDFRef ? doc.context.lookup(matrixEntry) : matrixEntry;
+        if (matrixArr instanceof PDFArray && matrixArr.size() >= 6) {
+          formMatrix = [
+            Number(matrixArr.get(0).asNumber ? matrixArr.get(0).asNumber() : matrixArr.get(0)) || 1,
+            Number(matrixArr.get(1).asNumber ? matrixArr.get(1).asNumber() : matrixArr.get(1)) || 0,
+            Number(matrixArr.get(2).asNumber ? matrixArr.get(2).asNumber() : matrixArr.get(2)) || 0,
+            Number(matrixArr.get(3).asNumber ? matrixArr.get(3).asNumber() : matrixArr.get(3)) || 1,
+            Number(matrixArr.get(4).asNumber ? matrixArr.get(4).asNumber() : matrixArr.get(4)) || 0,
+            Number(matrixArr.get(5).asNumber ? matrixArr.get(5).asNumber() : matrixArr.get(5)) || 0,
+          ];
+        }
+
+        const kName = key.encodedName ? key.encodedName.replace(/^\//, '') : key.toString().replace(/^\//, '');
+        const invocationCtms = (doMap && doMap.get(kName)) ? doMap.get(kName) : [parentCtm];
+
+        for (const invCtm of invocationCtms) {
+          const combinedMatrix = multiplyMatrix(formMatrix, invCtm);
+
+          const bboxEntry = streamObj.dict.get(PDFName.of('BBox'));
+          const bboxArr = bboxEntry instanceof PDFRef ? doc.context.lookup(bboxEntry) : bboxEntry;
+          let intersects = true;
+          if (bboxArr instanceof PDFArray && bboxArr.size() >= 4) {
+            const bx1 = Number(bboxArr.get(0).asNumber ? bboxArr.get(0).asNumber() : bboxArr.get(0)) || 0;
+            const by1 = Number(bboxArr.get(1).asNumber ? bboxArr.get(1).asNumber() : bboxArr.get(1)) || 0;
+            const bx2 = Number(bboxArr.get(2).asNumber ? bboxArr.get(2).asNumber() : bboxArr.get(2)) || 0;
+            const by2 = Number(bboxArr.get(3).asNumber ? bboxArr.get(3).asNumber() : bboxArr.get(3)) || 0;
+
+            const corners = [
+              { x: bx1, y: by1 }, { x: bx1, y: by2 },
+              { x: bx2, y: by1 }, { x: bx2, y: by2 }
+            ].map(pt => ({
+              x: pt.x * combinedMatrix[0] + pt.y * combinedMatrix[2] + combinedMatrix[4],
+              y: pt.x * combinedMatrix[1] + pt.y * combinedMatrix[3] + combinedMatrix[5]
+            }));
+            const minX = Math.min(...corners.map(c => c.x));
+            const maxX = Math.max(...corners.map(c => c.x));
+            const minY = Math.min(...corners.map(c => c.y));
+            const maxY = Math.max(...corners.map(c => c.y));
+
+            intersects = false;
+            for (const b of pageBoxes) {
+              const rbx1 = Math.min(b.x, b.x + b.width);
+              const rbx2 = Math.max(b.x, b.x + b.width);
+              const rby1 = Math.min(b.y, b.y + b.height);
+              const rby2 = Math.max(b.y, b.y + b.height);
+              if (!(maxX < rbx1 || minX > rbx2 || maxY < rby1 || minY > rby2)) {
+                intersects = true;
+                break;
+              }
             }
           }
-        } else if (typeof streamObj.getContents === 'function') {
-          rawBytes = streamObj.getContents();
-        }
 
-        if (!rawBytes) continue;
+          if (intersects) {
+            let rawBytes;
+            if (typeof decodePDFRawStream === 'function') {
+              try { rawBytes = decodePDFRawStream(streamObj).decode(); } catch (e) {}
+            }
+            if (!rawBytes && typeof streamObj.getContents === 'function') {
+              rawBytes = streamObj.getContents();
+            }
+            if (rawBytes) {
+              let streamStr;
+              try {
+                if (typeof require !== 'undefined') {
+                  const zlib = require('zlib');
+                  streamStr = latin1Decoder.decode(zlib.inflateSync(rawBytes));
+                } else {
+                  streamStr = latin1Decoder.decode(rawBytes);
+                }
+              } catch {
+                streamStr = latin1Decoder.decode(rawBytes);
+              }
 
-        let streamStr;
-        try {
-          if (typeof require !== 'undefined') {
-            const zlib = require('zlib');
-            const uncompressed = zlib.inflateSync(rawBytes);
-            streamStr = latin1Decoder.decode(uncompressed);
-          } else {
-            streamStr = latin1Decoder.decode(rawBytes);
+              const nestedDoMap = new Map();
+              const sanitizedStr = sanitizeContentStream(streamStr, pageBoxes, combinedMatrix, nestedDoMap);
+
+              const dictEntries = {};
+              for (const [dKey, dVal] of streamObj.dict.entries()) {
+                const k = dKey.encodedName ? dKey.encodedName.replace(/^\//, '') : dKey.toString().replace(/^\//, '');
+                if (k !== 'Filter' && k !== 'Length') {
+                  dictEntries[k] = dVal;
+                }
+              }
+              const newStream = doc.context.flateStream(new TextEncoder().encode(sanitizedStr), dictEntries);
+              if (refOrStream instanceof PDFRef) {
+                doc.context.assign(refOrStream, newStream);
+              }
+
+              const nestedRes = streamObj.dict.get(PDFName.of('Resources'));
+              if (nestedRes) {
+                sanitizeFormXObjects(nestedRes, pageBoxes, combinedMatrix, nestedDoMap, visitedRefs);
+              }
+            }
           }
-        } catch {
-          streamStr = latin1Decoder.decode(rawBytes);
-        }
-
-        const sanitizedStr = sanitizeContentStream(streamStr, pageBoxes);
-        const newStream = doc.context.flateStream(new TextEncoder().encode(sanitizedStr));
-        if (targetRef) {
-          doc.context.assign(targetRef, newStream);
-        } else {
-          const registered = doc.context.register(newStream);
-          page.node.set(PDFName.of('Contents'), registered);
         }
       }
+    }
+
+    for (const [pIdx, pageBoxes] of boxesByPage.entries()) {
+      const page = pages[pIdx];
+      const pageDoMap = new Map();
+      const rawContents = page.node.get(PDFName.of('Contents'));
+      if (rawContents) {
+        const items = rawContents instanceof PDFArray ? rawContents.asArray() : [rawContents];
+        for (const item of items) {
+          let streamObj;
+          let targetRef = null;
+          if (item instanceof PDFRef) {
+            targetRef = item;
+            streamObj = doc.context.lookup(item);
+          } else {
+            streamObj = item;
+          }
+          if (!streamObj) continue;
+
+          let rawBytes;
+          if (typeof decodePDFRawStream === 'function') {
+            try {
+              rawBytes = decodePDFRawStream(streamObj).decode();
+            } catch (e) {
+              if (typeof streamObj.getContents === 'function') {
+                rawBytes = streamObj.getContents();
+              }
+            }
+          } else if (typeof streamObj.getContents === 'function') {
+            rawBytes = streamObj.getContents();
+          }
+
+          if (!rawBytes) continue;
+
+          let streamStr;
+          try {
+            if (typeof require !== 'undefined') {
+              const zlib = require('zlib');
+              const uncompressed = zlib.inflateSync(rawBytes);
+              streamStr = latin1Decoder.decode(uncompressed);
+            } else {
+              streamStr = latin1Decoder.decode(rawBytes);
+            }
+          } catch {
+            streamStr = latin1Decoder.decode(rawBytes);
+          }
+
+          const sanitizedStr = sanitizeContentStream(streamStr, pageBoxes, [1, 0, 0, 1, 0, 0], pageDoMap);
+          const newStream = doc.context.flateStream(new TextEncoder().encode(sanitizedStr));
+          if (targetRef) {
+            doc.context.assign(targetRef, newStream);
+          } else {
+            const registered = doc.context.register(newStream);
+            page.node.set(PDFName.of('Contents'), registered);
+          }
+        }
+      }
+
+      // Sanitize Page Annotations (/Annots)
+      const rawAnnots = page.node.get(PDFName.of('Annots'));
+      if (rawAnnots) {
+        const annots = rawAnnots instanceof PDFRef ? doc.context.lookup(rawAnnots) : rawAnnots;
+        if (annots instanceof PDFArray) {
+          const keptAnnots = [];
+          const annotCount = annots.size();
+          for (let i = 0; i < annotCount; i++) {
+            const annotRef = annots.get(i);
+            const annot = annotRef instanceof PDFRef ? doc.context.lookup(annotRef) : annotRef;
+            if (!annot || !(annot instanceof PDFDict)) {
+              keptAnnots.push(annotRef);
+              continue;
+            }
+            const rectObj = annot.get(PDFName.of('Rect'));
+            const rectArr = rectObj instanceof PDFRef ? doc.context.lookup(rectObj) : rectObj;
+            let intersects = false;
+            if (rectArr instanceof PDFArray && rectArr.size() >= 4) {
+              const r0 = Number(rectArr.get(0).asNumber ? rectArr.get(0).asNumber() : rectArr.get(0)) || 0;
+              const r1 = Number(rectArr.get(1).asNumber ? rectArr.get(1).asNumber() : rectArr.get(1)) || 0;
+              const r2 = Number(rectArr.get(2).asNumber ? rectArr.get(2).asNumber() : rectArr.get(2)) || 0;
+              const r3 = Number(rectArr.get(3).asNumber ? rectArr.get(3).asNumber() : rectArr.get(3)) || 0;
+              const ax1 = Math.min(r0, r2);
+              const ax2 = Math.max(r0, r2);
+              const ay1 = Math.min(r1, r3);
+              const ay2 = Math.max(r1, r3);
+              for (const b of pageBoxes) {
+                const bx1 = Math.min(b.x, b.x + b.width);
+                const bx2 = Math.max(b.x, b.x + b.width);
+                const by1 = Math.min(b.y, b.y + b.height);
+                const by2 = Math.max(b.y, b.y + b.height);
+                if (!(ax2 < bx1 || ax1 > bx2 || ay2 < by1 || ay1 > by2)) {
+                  intersects = true;
+                  break;
+                }
+              }
+            }
+            if (intersects) {
+              // Strip sensitive dictionary keys: Action (hyperlinks), Destinations, Tooltips, Contents, Appearance
+              annot.delete(PDFName.of('A'));
+              annot.delete(PDFName.of('Dest'));
+              annot.delete(PDFName.of('Contents'));
+              annot.delete(PDFName.of('TU'));
+              annot.delete(PDFName.of('RC'));
+              annot.delete(PDFName.of('T'));
+              annot.delete(PDFName.of('AP'));
+              annot.delete(PDFName.of('V'));
+              annot.delete(PDFName.of('DV'));
+            } else {
+              keptAnnots.push(annotRef);
+            }
+          }
+          if (keptAnnots.length === 0) {
+            page.node.delete(PDFName.of('Annots'));
+          } else {
+            page.node.set(PDFName.of('Annots'), doc.context.obj(keptAnnots));
+          }
+        }
+      }
+
+      // Sanitize Form XObjects in page Resources
+      const pageRes = page.node.get(PDFName.of('Resources'));
+      if (pageRes) {
+        sanitizeFormXObjects(pageRes, pageBoxes, [1, 0, 0, 1, 0, 0], pageDoMap);
+      }
+    }
+
+    // Sanitize AcroForm Fields intersecting redaction boxes
+    try {
+      const form = doc.getForm();
+      const fields = form.getFields();
+      for (const field of fields) {
+        let fieldHit = false;
+        const widgets = field.acroField ? field.acroField.getWidgets() : [];
+        for (const w of widgets) {
+          let wPageIdx = -1;
+          const pRef = w.P();
+          if (pRef) {
+            wPageIdx = pages.findIndex(p => p.ref === pRef || p.node === doc.context.lookup(pRef));
+          }
+          if (wPageIdx === -1) {
+            for (let pi = 0; pi < pages.length; pi++) {
+              const rawAnnots = pages[pi].node.get(PDFName.of('Annots'));
+              const annots = rawAnnots instanceof PDFRef ? doc.context.lookup(rawAnnots) : rawAnnots;
+              if (annots instanceof PDFArray) {
+                for (let ai = 0; ai < annots.size(); ai++) {
+                  const aItem = annots.get(ai);
+                  if (aItem === w.dict || (aItem instanceof PDFRef && doc.context.lookup(aItem) === w.dict)) {
+                    wPageIdx = pi;
+                    break;
+                  }
+                }
+              }
+              if (wPageIdx !== -1) break;
+            }
+          }
+
+          const pBoxes = wPageIdx >= 0 ? boxesByPage.get(wPageIdx) : null;
+          if (!pBoxes || pBoxes.length === 0) continue;
+
+          let rect = null;
+          try { rect = w.getRectangle(); } catch (e) {}
+          if (!rect) {
+            const rObj = w.dict.get(PDFName.of('Rect'));
+            const rArr = rObj instanceof PDFRef ? doc.context.lookup(rObj) : rObj;
+            if (rArr instanceof PDFArray && rArr.size() >= 4) {
+              const r0 = Number(rArr.get(0).asNumber ? rArr.get(0).asNumber() : rArr.get(0)) || 0;
+              const r1 = Number(rArr.get(1).asNumber ? rArr.get(1).asNumber() : rArr.get(1)) || 0;
+              const r2 = Number(rArr.get(2).asNumber ? rArr.get(2).asNumber() : rArr.get(2)) || 0;
+              const r3 = Number(rArr.get(3).asNumber ? rArr.get(3).asNumber() : rArr.get(3)) || 0;
+              rect = { x: Math.min(r0, r2), y: Math.min(r1, r3), width: Math.abs(r2 - r0), height: Math.abs(r3 - r1) };
+            }
+          }
+
+          if (rect) {
+            const wx1 = rect.x;
+            const wx2 = rect.x + rect.width;
+            const wy1 = rect.y;
+            const wy2 = rect.y + rect.height;
+            for (const b of pBoxes) {
+              const bx1 = Math.min(b.x, b.x + b.width);
+              const bx2 = Math.max(b.x, b.x + b.width);
+              const by1 = Math.min(b.y, b.y + b.height);
+              const by2 = Math.max(b.y, b.y + b.height);
+              if (!(wx2 < bx1 || wx1 > bx2 || wy2 < by1 || wy1 > by2)) {
+                fieldHit = true;
+                w.dict.delete(PDFName.of('AP'));
+                w.dict.delete(PDFName.of('V'));
+                w.dict.delete(PDFName.of('DV'));
+                w.dict.delete(PDFName.of('TU'));
+                break;
+              }
+            }
+          }
+        }
+
+        if (fieldHit) {
+          if (typeof field.setText === 'function') {
+            try { field.setText(''); } catch (e) {}
+          } else if (typeof field.clear === 'function') {
+            try { field.clear(); } catch (e) {}
+          } else if (typeof field.uncheck === 'function') {
+            try { field.uncheck(); } catch (e) {}
+          }
+          if (field.acroField && field.acroField.dict) {
+            field.acroField.dict.delete(PDFName.of('V'));
+            field.acroField.dict.delete(PDFName.of('DV'));
+            field.acroField.dict.delete(PDFName.of('TU'));
+            field.acroField.dict.delete(PDFName.of('AP'));
+          }
+        }
+      }
+    } catch (e) {
+      // Graceful fallback for non-form PDFs
     }
 
     let labelFont = null;

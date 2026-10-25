@@ -85,3 +85,45 @@ Integrity mode: development
 - [ ] All 30 tools in the mega-menu correctly open their workspace and execute without console errors.
 - [ ] `npm test` passes 100% with added tests for redaction text stripping, compression downsampling, and unlock failure modes.
 - [ ] Downsampled images in `compressPDF()` achieve measurable byte reduction (>20% on image-heavy documents).
+
+
+## 2026-10-25T12:16:29Z
+
+Execute the PDF Studio Remediation & Hardening plan across 3 phases (Security & Core Engine Hardening, Offline Invariants & Performance, Integrity & Mobile UX), committing changes to Git and pushing to GitHub (`origin/main`) after completing each phase.
+
+Working directory: c:\Users\vedan\OneDrive\Desktop\projects\pdftool
+Integrity mode: development
+
+## Requirements
+
+### R1. Security & Core Engine Hardening (Phase 1)
+- Redaction safety: Sanitize `/Annots` (hyperlinks, tooltips), form field values, and nested Form `/XObject` dictionaries intersecting redaction bounding boxes so that no sensitive data can be retrieved from page streams or dictionaries.
+- Image compression color & alpha preservation: Convert `/DeviceCMYK` channels to RGB before canvas drawing to prevent color inversion; preserve `/SMask` or PNG format to prevent losing transparency; eliminate unreferenced orphan image stream objects.
+- Modern PDF XRef repair guard: Detect PDF 1.5+ cross-reference streams (`/Type /XRef`) in `hasValidTrailer` to avoid false corruption repair passes, and replace repeating space allocations with slice indices.
+
+### R2. Offline Invariants & Performance (Phase 2)
+- Local PDF Worker wiring: Point PDF.js worker directly to the local bundled `vendor/pdf.worker.min.js` in `app.js`, eliminating external CDN fallback and 404 network errors.
+- Compare PDF memory optimization: Generate diff metrics across pages without retaining all full-resolution PNG data URLs simultaneously; zero canvas dimensions after page diffing.
+- Honest labeling & stub handling: Throw a clear user error if client-side OCR is invoked without Tesseract WASM; label glossary translation accurately with zero-network transmission disclosures.
+
+### R3. Integrity, Verification & Mobile UX (Phase 3)
+- Replace Latin1 char code arithmetic in `pdfToExcel` column naming with static alphabet indexing.
+- Consolidate test runner in `package.json` to include all audit and security suites; ensure a 100% pass rate.
+- Add mobile touch reordering controls (◀ / ▶) for Organize PDF thumbnails on viewports <= 900px.
+
+### R4. Regular Git Commits & Push
+- Create clean, conventional Git commits after each phase is completed and verified (`feat(security): ...`, `fix(offline): ...`, `feat(mobile): ...`).
+- Push each verified commit to the remote repository (`origin/main`).
+
+## Acceptance Criteria
+
+### Automated Verification
+- [ ] `npm test` runs cleanly and passes 100% across all unit, core, audit, and security test suites.
+- [ ] Redaction verification asserts unclickable links and blank form values within redacted bounding boxes.
+- [ ] Image compression verification confirms >20% size reduction on image-heavy PDFs with CMYK and alpha preservation intact.
+- [ ] Zero network requests to external CDNs when loading the PDF worker.
+
+### Git & Code Hygiene
+- [ ] Git commit history shows discrete, well-structured commits corresponding to completed phases.
+- [ ] All commits are pushed to `origin/main`.
+- [ ] Clean working tree with no temporary or orphan debug files.

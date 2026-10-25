@@ -11,7 +11,9 @@
 const assert = require('assert');
 const http = require('http');
 const https = require('https');
-const { PDFDocument, PDFName } = require('pdf-lib');
+const zlib = require('zlib');
+const PDFLib = require('pdf-lib');
+const { PDFDocument, PDFName, PDFRawStream, PDFArray, PDFRef } = PDFLib;
 const PDFCore = require('../pdf_core');
 
 // ============================================================================
@@ -37,6 +39,48 @@ const PNG_1X1_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4
 
 function createTestPNG() {
   return Buffer.from(PNG_1X1_BASE64, 'base64');
+}
+
+function createSyntheticPNGWithAlpha(width, height, alphaValue = 128) {
+  const crcTable = [];
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+    crcTable[n] = c >>> 0;
+  }
+  function crc32(buf) {
+    let crc = 0xffffffff;
+    for (let i = 0; i < buf.length; i++) crc = crcTable[(crc ^ buf[i]) & 0xff] ^ (crc >>> 8);
+    return (crc ^ 0xffffffff) >>> 0;
+  }
+  function makeChunk(type, data) {
+    const len = data.length;
+    const buf = Buffer.alloc(8 + len + 4);
+    buf.writeUInt32BE(len, 0);
+    buf.write(type, 4, 4, 'ascii');
+    data.copy(buf, 8);
+    buf.writeUInt32BE(crc32(buf.slice(4, 8 + len)), 8 + len);
+    return buf;
+  }
+  const sig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const ihdrData = Buffer.alloc(13);
+  ihdrData.writeUInt32BE(width, 0);
+  ihdrData.writeUInt32BE(height, 4);
+  ihdrData[8] = 8; ihdrData[9] = 6;
+  const ihdrChunk = makeChunk('IHDR', ihdrData);
+  const rowLen = 1 + width * 4;
+  const rawData = Buffer.alloc(rowLen * height);
+  for (let y = 0; y < height; y++) {
+    const rowOffset = y * rowLen;
+    rawData[rowOffset] = 0;
+    for (let x = 0; x < width; x++) {
+      const pxOffset = rowOffset + 1 + x * 4;
+      rawData[pxOffset] = 255; rawData[pxOffset + 1] = 100; rawData[pxOffset + 2] = 50; rawData[pxOffset + 3] = alphaValue;
+    }
+  }
+  const idatChunk = makeChunk('IDAT', zlib.deflateSync(rawData));
+  const iendChunk = makeChunk('IEND', Buffer.alloc(0));
+  return Buffer.concat([sig, ihdrChunk, idatChunk, iendChunk]);
 }
 
 async function createSamplePDF(pageCount, text = 'Page') {
@@ -493,6 +537,252 @@ async function runSuite() {
     const finalDoc = await PDFDocument.load(step3);
     assert.strictEqual(finalDoc.getPageCount(), 3, 'Pipeline document has 3 pages');
     assert.strictEqual(finalDoc.getPage(0).getRotation().angle, 180, 'Page 0 rotated');
+  });
+
+  // --------------------------------------------------------------------------
+  // Tier 5: Phase 1 Security Hardening & Core Engine Invariants
+  // --------------------------------------------------------------------------
+  console.log('\n--- Tier 5: Phase 1 Security Hardening & Core Engine Invariants ---');
+
+  await runTest('T5', '1', 'Redaction Safety: Sanitize /Annots (hyperlinks, tooltips) intersecting redactions', async () => {
+    assert(typeof PDFCore.redactPDF === 'function', 'redactPDF required');
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([500, 500]);
+
+    // Link 1: inside redaction box [40, 390, 220, 50]
+    const link1 = doc.context.obj({
+      Type: 'Annot', Subtype: 'Link', Rect: [50, 400, 200, 430],
+      A: { Type: 'Action', S: 'URI', URI: 'https://secret-vault.internal/leak?token=SECRET123' },
+      Contents: 'Confidential Internal Portal'
+    });
+    // Link 2: outside redaction box at [50, 50, 200, 80]
+    const link2 = doc.context.obj({
+      Type: 'Annot', Subtype: 'Link', Rect: [50, 50, 200, 80],
+      A: { Type: 'Action', S: 'URI', URI: 'https://public-docs.org/safe' },
+      Contents: 'Public Safe Link'
+    });
+
+    const r1 = doc.context.register(link1);
+    const r2 = doc.context.register(link2);
+    page.node.set(PDFName.of('Annots'), doc.context.obj([r1, r2]));
+
+    const originalBytes = await doc.save();
+    const redactedBytes = await PDFCore.redactPDF(originalBytes, [
+      { pageIndex: 0, x: 40, y: 390, width: 220, height: 50 }
+    ]);
+
+    const loaded = await PDFDocument.load(redactedBytes);
+    const annotsRef = loaded.getPage(0).node.get(PDFName.of('Annots'));
+    const annots = loaded.context.lookup(annotsRef);
+    assert(annots instanceof PDFArray, 'Annots must remain a PDFArray');
+    assert.strictEqual(annots.size(), 1, 'Only non-intersecting annotation must remain');
+
+    const remLink = loaded.context.lookup(annots.get(0));
+    const remAction = loaded.context.lookup(remLink.get(PDFName.of('A')));
+    const remUri = remAction.get(PDFName.of('URI')).toString();
+    assert(remUri.includes('public-docs.org'), 'Public safe link must remain intact');
+  });
+
+  await runTest('T5', '2', 'Redaction Safety: Purge form field values (/V, /DV, /AP) intersecting redactions', async () => {
+    assert(typeof PDFCore.redactPDF === 'function', 'redactPDF required');
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([500, 500]);
+    const form = doc.getForm();
+    const tf = form.createTextField('sensitiveCreditCard');
+    tf.setText('TOP_SECRET_CARD_4111_2222_3333');
+    tf.addToPage(page, { x: 50, y: 300, width: 250, height: 30 });
+
+    const originalBytes = await doc.save();
+    const redactedBytes = await PDFCore.redactPDF(originalBytes, [
+      { pageIndex: 0, x: 40, y: 290, width: 270, height: 50 }
+    ]);
+
+    const loaded = await PDFDocument.load(redactedBytes);
+    const field = loaded.getForm().getTextField('sensitiveCreditCard');
+    assert(!field.getText(), 'Field text must be cleared or undefined');
+    assert(!field.acroField.dict.has(PDFName.of('V')), 'Field /V must be deleted');
+    assert(!field.acroField.dict.has(PDFName.of('DV')), 'Field /DV must be deleted');
+    assert(!field.acroField.dict.has(PDFName.of('AP')), 'Field /AP must be deleted');
+
+    const extractedText = await PDFCore.pdfToText(redactedBytes);
+    assert(!extractedText.includes('TOP_SECRET_CARD'), 'Sensitive form value must not be extractable via pdfToText');
+  });
+
+  await runTest('T5', '3', 'Redaction Safety: Recursively sanitize Form /XObjects intersecting redactions', async () => {
+    assert(typeof PDFCore.redactPDF === 'function', 'redactPDF required');
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([500, 500]);
+
+    const embeddedDoc = await PDFDocument.create();
+    const subPage = embeddedDoc.addPage([200, 200]);
+    subPage.drawText('EMBEDDED_CONFIDENTIAL_KEY_999', { x: 10, y: 10, size: 12 });
+
+    const [embeddedPage] = await doc.embedPages([subPage]);
+    page.drawPage(embeddedPage, { x: 50, y: 50, width: 200, height: 200 });
+
+    const originalBytes = await doc.save();
+    const textBefore = await PDFCore.pdfToText(originalBytes);
+    assert(textBefore.includes('EMBEDDED_CONFIDENTIAL_KEY_999'), 'Unredacted document contains embedded key');
+
+    const redactedBytes = await PDFCore.redactPDF(originalBytes, [
+      { pageIndex: 0, x: 40, y: 40, width: 220, height: 220 }
+    ]);
+
+    const textAfter = await PDFCore.pdfToText(redactedBytes);
+    assert(!textAfter.includes('EMBEDDED_CONFIDENTIAL_KEY_999'), 'Form /XObject text must be stripped under redaction box');
+  });
+
+  await runTest('T5', '4', 'Image Compression: Convert /DeviceCMYK channels to RGB without color inversion', async () => {
+    assert(typeof PDFCore.compressPDF === 'function', 'compressPDF required');
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([300, 300]);
+
+    // 100x100 pure cyan raster: C=255, M=0, Y=0, K=0
+    const cmykBytes = Buffer.alloc(100 * 100 * 4);
+    for (let i = 0; i < cmykBytes.length; i += 4) {
+      cmykBytes[i] = 255; // C
+      cmykBytes[i + 1] = 0;
+      cmykBytes[i + 2] = 0;
+      cmykBytes[i + 3] = 0;
+    }
+    const deflated = zlib.deflateSync(cmykBytes);
+    const imgDict = doc.context.obj({
+      Type: 'XObject',
+      Subtype: 'Image',
+      Width: 100,
+      Height: 100,
+      ColorSpace: 'DeviceCMYK',
+      BitsPerComponent: 8,
+      Filter: 'FlateDecode',
+    });
+    const stream = PDFRawStream.of(imgDict, deflated);
+    const imgRef = doc.context.register(stream);
+    page.node.set(PDFName.of('Resources'), doc.context.obj({
+      XObject: { ImCmyk: imgRef }
+    }));
+
+    const origPdf = await doc.save();
+    const compressed = await PDFCore.compressPDF(origPdf, { level: 'recommended' });
+    const verifiedDoc = await PDFDocument.load(compressed);
+
+    let verified = false;
+    for (const [, obj] of verifiedDoc.context.enumerateIndirectObjects()) {
+      if (obj instanceof PDFRawStream && obj.dict?.get(PDFName.of('Subtype'))?.toString() === '/Image') {
+        const cs = obj.dict.get(PDFName.of('ColorSpace'))?.toString();
+        assert.strictEqual(cs, '/DeviceRGB', 'ColorSpace must be converted to /DeviceRGB');
+        const uncompressed = zlib.inflateSync(obj.getContents());
+        // Pure cyan in RGB: R=0, G=255, B=255
+        assert.strictEqual(uncompressed[0], 0, 'Red channel must be 0 for pure cyan');
+        assert.strictEqual(uncompressed[1], 255, 'Green channel must be 255 for pure cyan');
+        assert.strictEqual(uncompressed[2], 255, 'Blue channel must be 255 for pure cyan');
+        verified = true;
+      }
+    }
+    assert(verified, 'CMYK image must be verified');
+  });
+
+  await runTest('T5', '5', 'Image Compression: Preserve /SMask transparency on transparent PNG images', async () => {
+    assert(typeof PDFCore.compressPDF === 'function', 'compressPDF required');
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([300, 300]);
+    const pngBytes = createSyntheticPNGWithAlpha(100, 100, 128);
+    const img = await doc.embedPng(pngBytes);
+    page.drawImage(img, { x: 20, y: 20, width: 200, height: 200 });
+
+    const origPdf = await doc.save();
+    const compressed = await PDFCore.compressPDF(origPdf, { level: 'recommended' });
+    const verifiedDoc = await PDFDocument.load(compressed);
+
+    let foundMainImage = false;
+    for (const [, obj] of verifiedDoc.context.enumerateIndirectObjects()) {
+      if (obj instanceof PDFRawStream && obj.dict?.get(PDFName.of('Subtype'))?.toString() === '/Image') {
+        if (obj.dict.has(PDFName.of('SMask'))) {
+          foundMainImage = true;
+          const smaskRef = obj.dict.get(PDFName.of('SMask'));
+          const smaskObj = verifiedDoc.context.lookup(smaskRef);
+          assert(smaskObj instanceof PDFRawStream, 'SMask must resolve to an image stream');
+          assert.strictEqual(smaskObj.dict.get(PDFName.of('ColorSpace'))?.toString(), '/DeviceGray');
+        }
+      }
+    }
+    assert(foundMainImage, 'Image with /SMask must be preserved in compressed PDF');
+  });
+
+  await runTest('T5', '6', 'Image Compression: Eliminate unreferenced orphan image stream objects', async () => {
+    assert(typeof PDFCore.compressPDF === 'function', 'compressPDF required');
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([300, 300]);
+
+    // Active referenced image
+    const s1 = PDFRawStream.of(doc.context.obj({
+      Type: 'XObject', Subtype: 'Image', Width: 10, Height: 10, ColorSpace: 'DeviceGray', BitsPerComponent: 8
+    }), new Uint8Array(100));
+    const r1 = doc.context.register(s1);
+    page.node.set(PDFName.of('Resources'), doc.context.obj({ XObject: { Im1: r1 } }));
+
+    // Orphan unreferenced image
+    const sOrphan = PDFRawStream.of(doc.context.obj({
+      Type: 'XObject', Subtype: 'Image', Width: 10, Height: 10, ColorSpace: 'DeviceGray', BitsPerComponent: 8
+    }), new Uint8Array(100));
+    doc.context.register(sOrphan);
+
+    const origPdf = await doc.save();
+    const origDoc = await PDFDocument.load(origPdf);
+    const origImages = Array.from(origDoc.context.enumerateIndirectObjects())
+      .filter(([, o]) => o instanceof PDFRawStream && o.dict?.get(PDFName.of('Subtype'))?.toString() === '/Image');
+    assert.strictEqual(origImages.length, 2, 'Initial PDF must have 2 image streams');
+
+    const compressed = await PDFCore.compressPDF(origPdf, { level: 'recommended' });
+    const verifiedDoc = await PDFDocument.load(compressed);
+    const compImages = Array.from(verifiedDoc.context.enumerateIndirectObjects())
+      .filter(([, o]) => o instanceof PDFRawStream && o.dict?.get(PDFName.of('Subtype'))?.toString() === '/Image');
+    assert.strictEqual(compImages.length, 1, 'Only 1 active image stream must remain; orphan must be eliminated');
+  });
+
+  await runTest('T5', '7', 'Modern PDF XRef Repair Guard: PDF 1.5+ XRef stream idempotence', async () => {
+    assert(typeof PDFCore.repairPDF === 'function', 'repairPDF required');
+    const doc = await PDFDocument.create();
+    doc.addPage([200, 200]);
+    const pdf15 = await doc.save({ useObjectStreams: true });
+    const rep15 = await PDFCore.repairPDF(pdf15);
+    const rep15Str = Buffer.from(rep15).toString('latin1');
+    assert(!rep15Str.includes('trailer\n<<\n  /Size'), 'PDF 1.5+ must preserve modern XRef stream without degrading to legacy ASCII trailer');
+
+    const reloaded = await PDFDocument.load(rep15);
+    assert.strictEqual(reloaded.getPageCount(), 1, 'Repaired PDF 1.5+ loads cleanly with 1 page');
+  });
+
+  await runTest('T5', '8', 'Modern PDF Repair Performance: Stream masking with slice indices', async () => {
+    assert(typeof PDFCore.repairPDF === 'function', 'repairPDF required');
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([400, 600]);
+    page.drawText('Genuine Uncorrupted Page', { x: 50, y: 550, size: 20 });
+    const originalBytes = await doc.save();
+
+    const latin = new TextDecoder('latin1').decode(originalBytes);
+    const streamIdx = latin.indexOf('stream');
+    assert(streamIdx > 0, 'Document must contain a stream');
+
+    // Inject fake /Root 999 0 R and fake 999 0 obj inside genuine stream content
+    const fakePayload = 'FAKE_STREAM_DATA /Root 999 0 R MORE_DATA 999 0 obj << /Type /Catalog /Bogus true >> endobj ';
+    const corruptedLatin = latin.slice(0, streamIdx + 7) + fakePayload + latin.slice(streamIdx + 7);
+
+    // Truncate trailer to trigger repairPDF reconstruction
+    const trailerIdx = corruptedLatin.lastIndexOf('trailer');
+    const brokenBytes = Buffer.from(corruptedLatin.slice(0, trailerIdx), 'latin1');
+
+    const repairedBytes = await PDFCore.repairPDF(brokenBytes);
+    const repairedLatin = new TextDecoder('latin1').decode(repairedBytes);
+
+    // The repaired trailer /Root must NOT reference the fake object 999 0 R
+    const trailerStr = repairedLatin.slice(repairedLatin.lastIndexOf('trailer'));
+    const rootMatch = trailerStr.match(/\/Root\s+(\d+)\s+(\d+)\s+R/);
+    assert(rootMatch, 'Repaired document must contain a reconstructed /Root reference in trailer');
+    const rootObjNum = parseInt(rootMatch[1], 10);
+    assert.notStrictEqual(rootObjNum, 999, 'repairPDF must NOT match fake /Root 999 0 R inside stream body');
+
+    const repDoc = await PDFDocument.load(repairedBytes);
+    assert.strictEqual(repDoc.getPageCount(), 1, 'Repaired document must recover genuine page');
   });
 
   // --------------------------------------------------------------------------
