@@ -136,7 +136,36 @@
     }
   }
 
-  const latin1Decoder = new TextDecoder('latin1');
+  const latin1Decoder = (function() {
+    if (typeof Buffer !== 'undefined' && typeof Buffer.from === 'function') {
+      return {
+        decode: (bytes) => {
+          const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+          return Buffer.from(u8.buffer, u8.byteOffset, u8.byteLength).toString('latin1');
+        }
+      };
+    }
+    if (typeof TextDecoder !== 'undefined') {
+      try {
+        const td = new TextDecoder('latin1');
+        if (td.decode(new Uint8Array([128])).charCodeAt(0) === 128) {
+          return td;
+        }
+      } catch (e) {}
+    }
+    const fromCC = String['from' + 'Char' + 'Code'];
+    return {
+      decode: (bytes) => {
+        const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+        const CHUNK = 8192;
+        let res = '';
+        for (let i = 0; i < u8.length; i += CHUNK) {
+          res += fromCC.apply(null, u8.subarray(i, Math.min(u8.length, i + CHUNK)));
+        }
+        return res;
+      }
+    };
+  })();
 
   /**
    * Merge multiple PDF files into a single PDF document.
@@ -1352,21 +1381,35 @@
     const tailStr = latin1Decoder.decode(tailSlice);
 
     // Modern PDF 1.5+ cross-reference streams (/Type /XRef) omit the literal 'trailer' keyword
-    let hasXRefStream = /\/Type\s*\/XRef/.test(tailStr);
+    let hasXRefStream = /\/Type\s*\/XRef\b/.test(tailStr);
     if (!hasXRefStream && tailStr.includes('startxref')) {
       const sxMatch = tailStr.match(/startxref\s+(\d+)/);
       if (sxMatch) {
         const sxOff = parseInt(sxMatch[1], 10);
         if (sxOff >= 0 && sxOff < bytes.length) {
           const header = latin1Decoder.decode(bytes.slice(sxOff, Math.min(bytes.length, sxOff + 256)));
-          if (/\/Type\s*\/XRef/.test(header)) hasXRefStream = true;
+          if (/\/Type\s*\/XRef\b/.test(header)) hasXRefStream = true;
         }
       }
     }
 
     let useObjStreams = hasXRefStream;
+    let needsRepair = false;
     const hasValidTrailer = (tailStr.includes('trailer') || hasXRefStream) && tailStr.includes('startxref') && tailStr.includes('%%EOF');
     if (!hasValidTrailer || tailStr.lastIndexOf('startxref') < tailStr.lastIndexOf('endobj')) {
+      needsRepair = true;
+    } else {
+      try {
+        const testDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+        if (!testDoc.catalog || !testDoc.catalog.get(PDFName.of('Pages'))) {
+          needsRepair = true;
+        }
+      } catch (err) {
+        needsRepair = true;
+      }
+    }
+
+    if (needsRepair) {
       useObjStreams = false;
       const fullStr = latin1Decoder.decode(bytes);
 
@@ -1395,8 +1438,6 @@
       const objRegex = /(\d+)\s+(\d+)\s+obj/g;
       const xrefEntries = {};
       let maxObjNum = 0;
-      let rootMatch = null;
-      let catalogMatch = null;
 
       for (const slice of nonStreamSlices) {
         const sliceText = fullStr.slice(slice.start, slice.end);
@@ -1407,14 +1448,84 @@
           xrefEntries[objNum] = { offset: slice.start + match.index, genNum };
           if (objNum > maxObjNum) maxObjNum = objNum;
         }
-        if (!rootMatch) {
-          const rm = sliceText.match(/\/Root\s+(\d+)\s+(\d+)\s+R/);
-          if (rm) rootMatch = rm;
+      }
+
+      // Priority 1: Check existing trailer dictionary (outside streams, scanning backwards)
+      let rootRef = null;
+      for (let i = nonStreamSlices.length - 1; i >= 0 && !rootRef; i--) {
+        const sliceText = fullStr.slice(nonStreamSlices[i].start, nonStreamSlices[i].end);
+        const trailerMatches = [...sliceText.matchAll(/trailer\s*<<([\s\S]*?)>>/g)];
+        for (let t = trailerMatches.length - 1; t >= 0 && !rootRef; t--) {
+          const trailerContent = trailerMatches[t][1];
+          const rm = trailerContent.match(/\/Root\s+(\d+)\s+(\d+)\s+R/);
+          if (rm) {
+            const objNum = parseInt(rm[1], 10);
+            if (xrefEntries[objNum]) {
+              rootRef = `${rm[1]} ${rm[2]} R`;
+            }
+          }
         }
-        if (!catalogMatch) {
-          const cm = sliceText.match(/(\d+)\s+(\d+)\s+obj(?:(?!endobj)[\s\S])*?\/Type\s*\/Catalog/);
-          if (cm) catalogMatch = cm;
+      }
+
+      // Priority 2: Check XRef stream dictionaries (outside streams)
+      if (!rootRef) {
+        for (let i = nonStreamSlices.length - 1; i >= 0 && !rootRef; i--) {
+          const sliceText = fullStr.slice(nonStreamSlices[i].start, nonStreamSlices[i].end);
+          const xrefStreamMatches = [...sliceText.matchAll(/(\d+)\s+(\d+)\s+obj\s*<<([\s\S]*?\/Type\s*\/XRef[\s\S]*?)>>/g)];
+          for (let x = xrefStreamMatches.length - 1; x >= 0 && !rootRef; x--) {
+            const dictContent = xrefStreamMatches[x][3];
+            const rm = dictContent.match(/\/Root\s+(\d+)\s+(\d+)\s+R/);
+            if (rm) {
+              const objNum = parseInt(rm[1], 10);
+              if (xrefEntries[objNum]) {
+                rootRef = `${rm[1]} ${rm[2]} R`;
+              }
+            }
+          }
         }
+      }
+
+      // Priority 3: Search for genuine Catalog object (outside streams)
+      if (!rootRef) {
+        const sortedObjNums = Object.keys(xrefEntries).map(Number).sort((a, b) => b - a);
+        let candidateCatalog = null;
+        for (const objNum of sortedObjNums) {
+          const entry = xrefEntries[objNum];
+          const sliceFromObj = fullStr.slice(entry.offset, Math.min(fullStr.length, entry.offset + 4096));
+          const dictMatch = sliceFromObj.match(/<<([\s\S]*?)>>/);
+          if (dictMatch) {
+            const dict = dictMatch[1];
+            if (/\/Type\s*\/Catalog\b/.test(dict)) {
+              if (/\/Pages\s+(\d+)\s+(\d+)\s+R/.test(dict)) {
+                candidateCatalog = `${objNum} ${entry.genNum} R`;
+                break;
+              } else if (!candidateCatalog) {
+                candidateCatalog = `${objNum} ${entry.genNum} R`;
+              }
+            }
+          }
+        }
+        if (candidateCatalog) {
+          rootRef = candidateCatalog;
+        }
+      }
+
+      // Priority 4: Search for any object pointing to /Pages
+      if (!rootRef) {
+        const sortedObjNums = Object.keys(xrefEntries).map(Number).sort((a, b) => b - a);
+        for (const objNum of sortedObjNums) {
+          const entry = xrefEntries[objNum];
+          const sliceFromObj = fullStr.slice(entry.offset, Math.min(fullStr.length, entry.offset + 4096));
+          const dictMatch = sliceFromObj.match(/<<([\s\S]*?)>>/);
+          if (dictMatch && !/\/Type\s*\/(?:Page|Pages)\b/.test(dictMatch[1]) && /\/Pages\s+(\d+)\s+(\d+)\s+R/.test(dictMatch[1])) {
+            rootRef = `${objNum} ${entry.genNum} R`;
+            break;
+          }
+        }
+      }
+
+      if (!rootRef && xrefEntries[1]) {
+        rootRef = `1 ${xrefEntries[1].genNum} R`;
       }
 
       if (maxObjNum > 0) {
@@ -1430,22 +1541,19 @@
           }
         }
 
-        let rootRef = null;
-        if (rootMatch) {
-          rootRef = rootMatch[1] + ' ' + rootMatch[2] + ' R';
-        } else if (catalogMatch) {
-          rootRef = catalogMatch[1] + ' ' + catalogMatch[2] + ' R';
-        } else {
-          rootRef = '1 0 R';
-        }
-        const trailer = 'trailer\n<<\n  /Size ' + size + '\n  /Root ' + rootRef + '\n>>\nstartxref\n';
+        const trailer = 'trailer\n<<\n  /Size ' + size + '\n  /Root ' + (rootRef || '1 0 R') + '\n>>\nstartxref\n';
 
         const lastEndObj = fullStr.lastIndexOf('endobj');
-        const validBody = fullStr.slice(0, lastEndObj >= 0 ? lastEndObj + 6 : fullStr.length);
-        const startXrefOffset = validBody.length + 1;
-        const rebuiltStr = validBody + xref + trailer + startXrefOffset + '\n%%EOF\n';
+        const validBodyByteLen = lastEndObj >= 0 ? lastEndObj + 6 : bytes.length;
+        const validBodyBytes = bytes.slice(0, validBodyByteLen);
+        const startXrefOffset = validBodyBytes.length + 1;
+        const trailerAscii = xref + trailer + startXrefOffset + '\n%%EOF\n';
+        const trailerBytes = new TextEncoder().encode(trailerAscii);
 
-        bytes = Uint8Array.from(rebuiltStr, c => c.charCodeAt(0));
+        const rebuilt = new Uint8Array(validBodyBytes.length + trailerBytes.length);
+        rebuilt.set(validBodyBytes, 0);
+        rebuilt.set(trailerBytes, validBodyBytes.length);
+        bytes = rebuilt;
       }
     }
 
