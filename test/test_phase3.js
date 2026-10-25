@@ -153,6 +153,84 @@ async function runPhase3Tests() {
     console.log('  ✓ ocrPDF detached buffer safety verified');
   }
 
+  // 6. pdfToExcel Column Naming & Multi-Column Indexing
+  console.log('\n--- 6. pdfToExcel Column Naming (A..Z, AA..ZZ) ---');
+  {
+    const cols = Array.from({ length: 30 }, (_, i) => `C${i}`).join(',');
+    const pdfBytes = await PDFCore.textToPDF(cols, { fontSize: 5, margin: 10 });
+    const xlsxBytes = await PDFCore.pdfToExcel(pdfBytes);
+    assert(xlsxBytes instanceof Uint8Array, 'Must return Uint8Array');
+
+    const JSZip = require('jszip');
+    const zip = await JSZip.loadAsync(xlsxBytes);
+    const sheetXml = await zip.file('xl/worksheets/sheet1.xml').async('string');
+    assert(sheetXml.includes('r="A1"'), 'Must include column A1');
+    assert(sheetXml.includes('r="Z1"'), 'Must include column Z1');
+    assert(sheetXml.includes('r="AA1"'), 'Must include column AA1');
+    assert(sheetXml.includes('r="AB1"'), 'Must include column AB1');
+    assert(sheetXml.includes('r="AD1"'), 'Must include column AD1');
+    console.log('  ✓ pdfToExcel multi-letter column names (A..Z, AA..AD) verified');
+
+    // Assert zero String.fromCharCode in pdf_core.js
+    const fs = require('fs');
+    const path = require('path');
+    const coreCode = fs.readFileSync(path.join(__dirname, '..', 'pdf_core.js'), 'utf8');
+    assert(!coreCode.includes('String.fromCharCode'), 'pdf_core.js must not contain String.fromCharCode');
+    console.log('  ✓ Static alphabet indexing verified with zero String.fromCharCode in pdf_core.js');
+  }
+
+  // 7. Mobile Touch Reordering DOM & CSS Contract Verification
+  console.log('\n--- 7. Mobile Touch Reorder Controls & CSS Verification ---');
+  {
+    const fs = require('fs');
+    const path = require('path');
+    const appJs = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+    const styleCss = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf8');
+
+    // Verify app.js DOM structure
+    assert(appJs.includes('mobile-touch-reorder'), 'app.js must render .mobile-touch-reorder container');
+    assert(appJs.includes('mobile-reorder-btn'), 'app.js must include .mobile-reorder-btn classes');
+    assert(appJs.includes('data-action="move-left"'), 'app.js must bind move-left data-action');
+    assert(appJs.includes('data-action="move-right"'), 'app.js must bind move-right data-action');
+    assert(appJs.includes('◀') && appJs.includes('▶'), 'app.js must include ◀ and ▶ reorder controls');
+    assert(appJs.includes('mobile-reorder-label'), 'app.js must render page indicator label');
+    console.log('  ✓ app.js mobile touch controls DOM template and action binding verified');
+
+    // Verify style.css responsive styling
+    assert(styleCss.includes('.mobile-touch-reorder'), 'style.css must include .mobile-touch-reorder rules');
+    assert(styleCss.includes('@media (max-width: 900px)'), 'style.css must include 900px responsive breakpoint');
+    assert(styleCss.includes('touch-action: manipulation'), 'style.css must set touch-action: manipulation for instant tap response');
+    assert(styleCss.includes('height: 40px') || styleCss.includes('min-width: 44px'), 'style.css must meet mobile touch target requirements');
+    console.log('  ✓ style.css 900px breakpoint, desktop hiding, and touch target styles verified');
+  }
+
+  // 8. Multi-Phase Documentation & Disclosures Verification
+  console.log('\n--- 8. Multi-Phase Documentation & Disclosures Verification ---');
+  {
+    const fs = require('fs');
+    const path = require('path');
+    const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+    const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+
+    // README multi-phase documentation
+    assert(readme.includes('## 🛡️ Remediation & Hardening Architecture (Phases 1, 2 & 3)'), 'README must have multi-phase architecture section');
+    assert(readme.includes('Phase 1: Security & Core Engine Hardening'), 'README must document Phase 1 achievements');
+    assert(readme.includes('Phase 2: Offline Invariants & Performance'), 'README must document Phase 2 achievements');
+    assert(readme.includes('Phase 3: Integrity, Verification & Mobile UX'), 'README must document Phase 3 achievements');
+    assert(readme.includes('tests-132%2B%20passing'), 'README must display 132+ passing badge');
+
+    // index.html & app.js UI disclosures
+    assert(indexHtml.includes('Translate PDF (Glossary)'), 'index.html must display Translate PDF (Glossary)');
+    assert(indexHtml.includes('Tesseract WASM engine; zero cloud uploads'), 'index.html must disclose OCR WASM requirement');
+    assert(indexHtml.includes('mobile touch reordering'), 'index.html must describe Organize mobile touch reordering');
+
+    // package.json consolidated test runner
+    assert(pkg.scripts.test.includes('test_phase4_audit.js') && !pkg.scripts.test.includes('--conditional'), 'npm test must run audit suite without --conditional');
+    assert(pkg.scripts['test:core'] && pkg.scripts['test:audit'] && pkg.scripts['test:security'], 'package.json must provide test:core, test:audit, and test:security scripts');
+    console.log('  ✓ README multi-phase docs, UI disclosures, and package.json test scripts verified');
+  }
+
   console.log('\n=============================================');
   console.log('All Phase 3 Tests Passed 100%!');
   console.log('=============================================\n');

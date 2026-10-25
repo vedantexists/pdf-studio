@@ -5,8 +5,10 @@
   "main": "app.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node test/test_core.js && node test/test_phase1.js && node test/test_phase2.js && node test/test_phase3.js && node test/test_phase4_conversions.js && node test/test_adversarial_challenger_m2_3.js && node test/test_phase4_audit.js --conditional",
-    "test:audit": "node test/test_phase4_audit.js"
+    "test": "node test/test_core.js && node test/test_phase1.js && node test/test_phase2.js && node test/test_phase3.js && node test/test_phase4_conversions.js && node test/test_phase4_audit.js && node test/test_adversarial_p1_redaction.js && node test/test_adversarial_p1_2.js && node test/test_adversarial_p2_1.js && node test/test_adversarial_challenger_p2_compare.js && node test/test_adversarial_challenger_m2_3.js && node test/test_reviewer_m1_adversarial.js && node test/test_reviewer_m2_adversarial.js",
+    "test:core": "node test/test_core.js && node test/test_phase1.js && node test/test_phase2.js && node test/test_phase3.js && node test/test_phase4_conversions.js",
+    "test:audit": "node test/test_phase4_audit.js",
+    "test:security": "node test/test_adversarial_p1_redaction.js && node test/test_adversarial_p1_2.js && node test/test_adversarial_p2_1.js && node test/test_adversarial_challenger_p2_compare.js && node test/test_adversarial_challenger_m2_3.js && node test/test_reviewer_m1_adversarial.js && node test/test_reviewer_m2_adversarial.js"
   },
   "keywords": [
     "pdf",

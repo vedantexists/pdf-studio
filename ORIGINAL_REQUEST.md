@@ -127,3 +127,8 @@ Integrity mode: development
 - [ ] Git commit history shows discrete, well-structured commits corresponding to completed phases.
 - [ ] All commits are pushed to `origin/main`.
 - [ ] Clean working tree with no temporary or orphan debug files.
+
+
+## 2026-10-25T13:49:46Z
+
+User directive: Always update the README.md and UI according to the progress of the remediation and hardening phases (e.g., documenting Phase 1 & Phase 2 security/offline/performance enhancements, updating UI indicators or disclosures). Ensure Phase 3 implementation includes corresponding README and UI updates before commit and push.

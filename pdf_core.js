@@ -3645,11 +3645,12 @@
       return idx;
     }
 
+    const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
     function getColName(idx) {
       let name = '';
       let n = idx;
       while (n >= 0) {
-        name = String.fromCharCode((n % 26) + 65) + name;
+        name = ALPHABET[n % 26] + name;
         n = Math.floor(n / 26) - 1;
       }
       return name;

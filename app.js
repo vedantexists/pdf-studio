@@ -131,7 +131,7 @@ document.addEventListener('DOMContentLoaded', () => {
       acceptImages: false,
       maxFiles: 1,
       multiple: false,
-      description: 'Sort, delete, and rotate pages visually with an interactive page thumbnail grid.',
+      description: 'Sort, delete, and rotate pages visually with interactive thumbnail grid and mobile touch reordering.',
     },
     'rotate': {
       title: 'Rotate PDF',
@@ -2090,12 +2090,19 @@ document.addEventListener('DOMContentLoaded', () => {
           ${removeBadgeHtml}
           ${extractBadgeHtml}
           <div class="page-card-actions">
-            ${isOrganize && i > 0 ? `<button type="button" class="icon-btn" title="Move Left" data-action="move-left" data-index="${i}">←</button>` : ''}
-            ${isOrganize && i < total - 1 ? `<button type="button" class="icon-btn" title="Move Right" data-action="move-right" data-index="${i}">→</button>` : ''}
+            ${isOrganize && i > 0 ? `<button type="button" class="icon-btn" title="Move Left" data-action="move-left" data-index="${i}">◀</button>` : ''}
+            ${isOrganize && i < total - 1 ? `<button type="button" class="icon-btn" title="Move Right" data-action="move-right" data-index="${i}">▶</button>` : ''}
             ${(isOrganize || isRotate) ? `<button type="button" class="icon-btn" title="Rotate 90°" data-action="rotate-page" data-index="${i}">↻</button>` : ''}
             ${isOrganize ? `<button type="button" class="icon-btn delete-btn" title="${pageData.isDeleted ? 'Restore Page' : 'Delete Page'}" data-action="toggle-delete" data-index="${i}">${pageData.isDeleted ? '↺' : '✕'}</button>` : ''}
           </div>
         </div>
+        ${isOrganize ? `
+          <div class="mobile-touch-reorder" aria-label="Touch Reorder Controls">
+            <button type="button" class="mobile-reorder-btn icon-btn" title="Move Page Left" data-action="move-left" data-index="${i}" ${i === 0 ? 'disabled' : ''} aria-label="Move Page Left">◀</button>
+            <span class="mobile-reorder-label">Page ${i + 1} of ${total}</span>
+            <button type="button" class="mobile-reorder-btn icon-btn" title="Move Page Right" data-action="move-right" data-index="${i}" ${i >= total - 1 ? 'disabled' : ''} aria-label="Move Page Right">▶</button>
+          </div>
+        ` : ''}
       `;
 
       if (isRemovePages) {
@@ -2250,7 +2257,7 @@ document.addEventListener('DOMContentLoaded', () => {
       toolSettings.innerHTML = `
         <div class="setting-group">
           <label>Organize Options</label>
-          <p class="setting-hint">Click ✕ to delete/exclude a page. Click ↻ to rotate. Use ← → to reorder pages.</p>
+          <p class="setting-hint">Click ✕ to delete/exclude a page. Click ↻ to rotate. Use ◀ ▶ (or touch controls on mobile) to reorder pages.</p>
           <button type="button" class="secondary-btn" id="resetOrganizeBtn" style="margin-top: 0.5rem;">Reset All Pages</button>
         </div>
       `;

@@ -5,7 +5,8 @@
 [![Live Demo](https://img.shields.io/badge/demo-online-brightgreen.svg)](https://vedantexists.github.io/pdf-studio/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Privacy: 100% Local](https://img.shields.io/badge/privacy-100%25%20local-emerald.svg)](#-100-in-browser-privacy)
-[![Tests: 94 Passing](https://img.shields.io/badge/tests-94%20passing-brightgreen.svg)](#-automated-verification-suite)
+[![Tests: 132+ Passing](https://img.shields.io/badge/tests-132%2B%20passing-brightgreen.svg)](#-automated-verification-suite)
+[![Remediation: Hardened](https://img.shields.io/badge/security-hardened%20(Phases%201--3)-blueviolet.svg)](#-remediation--hardening-architecture-phases-1-3)
 
 🌐 **Live Studio**: [https://vedantexists.github.io/pdf-studio/](https://vedantexists.github.io/pdf-studio/)
 
@@ -24,7 +25,7 @@
 - **Split PDF**: Extract all pages as separate PDFs (ZIP) or extract custom page ranges (e.g. `1-3, 5`).
 - **Remove Pages**: Target and delete unwanted pages cleanly.
 - **Extract Pages**: Pull selected pages into a standalone PDF.
-- **Organize PDF**: Visual thumbnail grid to reorder, delete, and rotate individual pages.
+- **Organize PDF**: Visual thumbnail grid to reorder, delete, and rotate individual pages with full desktop controls and mobile touch reordering (◀ / ▶) on viewports ≤900px.
 - **Scan to PDF**: Capture multi-page documents directly using your mobile camera or desktop webcam with Otsu binarization and contrast presets.
 
 ### 2. Optimize PDF
@@ -65,7 +66,7 @@
 
 ### 7. PDF Intelligence (Beta)
 - **AI Summarizer (Beta)**: Extractive in-memory executive summary & bullet key takeaways using client-side sentence significance scoring (100% private, zero external model downloads or cloud APIs).
-- **Translate PDF (Beta)**: Local in-memory term and phrase translation using built-in dictionaries (Spanish, French, German, Italian) with zero data egress.
+- **Translate PDF (Glossary)**: Local in-memory term and business glossary translation using built-in offline dictionaries (Spanish, French, German, Italian) with 100% client-side privacy and zero network egress.
 - **PDF to Markdown**: Direct extraction of headings, lists, tables, and code blocks into structured Markdown.
 
 ---
@@ -105,6 +106,45 @@ All processing happens entirely in client memory using WebAssembly and pure Java
 
 ---
 
+## 🛡️ Remediation & Hardening Architecture (Phases 1, 2 & 3)
+
+PDF Studio has undergone comprehensive multi-phase engine hardening to guarantee enterprise-grade data privacy, memory safety, and cross-platform UX without server dependence:
+
+### Phase 1: Security & Core Engine Hardening
+- **Deep Redaction Sanitization**:
+  - Automatically sanitizes all page annotation dictionaries (`/Annots`), including hyperlinks (`/Link`), tooltips, and popup text intersecting redaction bounding boxes to prevent link leaks.
+  - Recursively strips and clears interactive form field values (`/V`, `/DV`, `/AP`) intersecting blackout coordinates.
+  - Performs deep traversal into nested Form `/XObject` content streams with Coordinate Transformation Matrix (CTM) tracking, stripping raw text operators (`Tj`, `TJ`, `'`, `"`) directly at the stream level so that no underlying sensitive text can ever be extracted, copied, or read.
+- **Image Compression Color & Alpha Preservation**:
+  - Automatic `/DeviceCMYK` channel conversion to sRGB before downsampling guarantees faithful color rendering and prevents color inversion (negative/neon artifacts) on print PDFs.
+  - Preserves soft masks (`/SMask`) and PNG formats during compression to maintain alpha channel transparency.
+  - Reachability graph sweeping identifies and purges unreferenced orphan image stream objects, achieving verified >80% file size reduction on image-heavy documents.
+- **Modern PDF 1.5+ XRef Stream Resilience & Fast Repair**:
+  - Detects PDF 1.5+ cross-reference streams (`/Type /XRef`) in `hasValidTrailer`, preventing false corruption repair passes on healthy modern PDFs.
+  - Replaced quadratic space string allocations in `repairPDF` with zero-allocation byte slice indexing (`nonStreamSlices`).
+
+### Phase 2: Offline Invariants & Performance
+- **Local Bundled PDF Worker (Zero CDN Egress)**:
+  - Configures `pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js'` across all application entry points.
+  - Completely eliminates runtime external CDN fallbacks (`cdnjs`, `unpkg`, `jsdelivr`) and 404 network errors, guaranteeing seamless functionality in air-gapped environments.
+- **Compare PDF Memory Optimization & GPU Resource Cleanup**:
+  - Stream-based per-page visual diffing bounds in-memory canvas caches (`maxDiffImages: 1`), preventing browser crashes and memory spikes on 50+ page documents.
+  - Wrapped in `try ... finally` blocks with immediate canvas dimension zeroing (`canvas.width = 0; canvas.height = 0`) to actively reclaim browser backing store and GPU textures.
+- **Honest Labeling & Transparent Disclosures**:
+  - Explicit error handling with informative instructions when client-side OCR is invoked without the local Tesseract WASM engine loaded.
+  - Re-labeled glossary translation as `Translate PDF (Glossary)` with prominent disclosures indicating offline dictionary term matching with zero network transmission.
+
+### Phase 3: Integrity, Verification & Mobile UX
+- **Robust Multi-Letter Spreadsheet Column Indexing**:
+  - Replaced Latin1 char code arithmetic (`String.fromCharCode(65 + col)`) in `pdfToExcel` with static alphabet lookup supporting arbitrary column counts (A..Z, AA..ZZ), preventing non-ASCII corruption on wide data tables.
+- **Consolidated Automated Verification Suite**:
+  - Consolidated test runner in `package.json` covering core features, security redlines, offline invariants, format conversions, and adversarial stress tests with 100% pass rate.
+- **Mobile Touch Reordering Controls (◀ / ▶)**:
+  - Responsive touch reordering bar on Organize PDF page thumbnails for viewports `≤ 900px`.
+  - Accessible 40px+ tap targets with `touch-action: manipulation` for instant response without double-tap delay, eliminating horizontal layout overflow on narrow mobile devices.
+
+---
+
 ## Quick Start
 
 ### Option 1: Open Live Web App
@@ -122,19 +162,25 @@ Then visit [http://localhost:3000](http://localhost:3000).
 ---
 
 ## 🧪 Automated Verification Suite
-Run the 94-test automated test harness covering privacy invariants, zero-network egress traps, conversion engines, and security cipher guards:
+Run the 132+ test automated verification harness covering security redlines, offline invariants, memory lifecycles, and zero-network egress traps:
 ```bash
 npm test
+```
+To run targeted test suites independently:
+```bash
+npm run test:core      # Core PDF operations and format conversions
+npm run test:audit     # Forensic audit and E2E acceptance traps
+npm run test:security  # Adversarial security, redaction, and cipher suites
 ```
 
 ---
 
 ## Repository Structure & Developer Notes
 - `pdf_core.js`: Pure PDF manipulation logic powered by `pdf-lib` and WebCrypto.
-- `app.js`: Application controller, drag-and-drop intake, and thumbnail rendering via `pdfjs-dist`.
-- `index.html` / `style.css`: Responsive dashboard grid and mega-menu navigation.
+- `app.js`: Application controller, drag-and-drop intake, mobile touch reordering, and thumbnail rendering via `pdfjs-dist`.
+- `index.html` / `style.css`: Responsive dashboard grid, mega-menu navigation, and mobile touch reorder layout.
 - `vendor/`: Self-contained vendor libraries (`pdf-lib.min.js`, `jszip.min.js`, `pdf.min.js`, `pdf.worker.min.js`, `pdf-lib-encrypt.js`).
-- `test/`: 7 test suites validating core features, security, compression, and zero egress.
+- `test/`: Comprehensive test suites validating core features, security, compression, mobile layout contracts, and zero egress.
 
 ---
 

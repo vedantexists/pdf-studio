@@ -1317,6 +1317,73 @@ main {
   .workspace-content {
     grid-template-columns: 1fr;
   }
+
+  /* Organize PDF Mobile Touch Reordering Controls */
+  .page-card-actions button[data-action="move-left"],
+  .page-card-actions button[data-action="move-right"] {
+    display: none;
+  }
+
+  .mobile-touch-reorder {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    margin-top: 0.6rem;
+    padding-top: 0.5rem;
+    border-top: 1px dashed var(--border);
+    gap: 0.35rem;
+  }
+
+  .mobile-reorder-btn {
+    flex: 1;
+    height: 40px;
+    min-width: 44px;
+    font-size: 1.15rem;
+    font-weight: 700;
+    line-height: 1;
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--primary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    -webkit-user-select: none;
+    transition: background 0.15s, border-color 0.15s, transform 0.1s;
+  }
+
+  .mobile-reorder-btn:hover {
+    background: #f1f5f9;
+    border-color: var(--border-hover);
+  }
+
+  .mobile-reorder-btn:active {
+    background: var(--primary-light);
+    border-color: var(--primary);
+    transform: scale(0.96);
+  }
+
+  .mobile-reorder-btn:disabled {
+    opacity: 0.25;
+    cursor: not-allowed;
+    pointer-events: none;
+    background: #f8fafc;
+    border-color: var(--border);
+    color: var(--text-muted);
+  }
+
+  .mobile-reorder-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    white-space: nowrap;
+    padding: 0 0.35rem;
+  }
 }
 
 .file-cards-container {
@@ -1458,6 +1525,10 @@ main {
 .page-card-actions {
   display: flex;
   gap: 0.25rem;
+}
+
+.mobile-touch-reorder {
+  display: none;
 }
 
 /* Sidebar / Settings panel */
