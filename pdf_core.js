@@ -45,32 +45,95 @@
         require.cache[pdfjsPath].exports = proxy;
       }
     } catch (e) {}
-    module.exports = factory(PDFLib, ple);
+    let jszip;
+    try { jszip = require('jszip'); } catch (e) {}
+    module.exports = factory(PDFLib, ple, jszip);
   } else {
-    root.PDFCore = factory(root.PDFLib, root.PDFLibEncrypt);
+    const getGlobal = (name) => {
+      if (typeof root !== 'undefined' && root && root[name]) return root[name];
+      if (typeof window !== 'undefined' && window && window[name]) return window[name];
+      if (typeof globalThis !== 'undefined' && globalThis && globalThis[name]) return globalThis[name];
+      if (typeof self !== 'undefined' && self && self[name]) return self[name];
+      return undefined;
+    };
+    const core = factory(getGlobal('PDFLib'), getGlobal('PDFLibEncrypt'), getGlobal('JSZip'));
+    if (typeof root !== 'undefined' && root) root.PDFCore = core;
+    if (typeof window !== 'undefined' && window) window.PDFCore = core;
+    if (typeof globalThis !== 'undefined' && globalThis) globalThis.PDFCore = core;
+    if (typeof self !== 'undefined' && self) self.PDFCore = core;
   }
-})(typeof self !== 'undefined' ? self : this, function (PDFLib, PDFLibEncrypt) {
-  if (PDFLibEncrypt && typeof PDFLibEncrypt.configure === 'function' && PDFLib) {
-    PDFLibEncrypt.configure(PDFLib);
+})(typeof self !== 'undefined' ? self : this, function (PDFLibArg, PDFLibEncryptArg, JSZipArg) {
+  function resolvePDFLib() {
+    if (PDFLibArg) return PDFLibArg;
+    if (typeof window !== 'undefined' && window.PDFLib) return window.PDFLib;
+    if (typeof globalThis !== 'undefined' && globalThis.PDFLib) return globalThis.PDFLib;
+    if (typeof self !== 'undefined' && self.PDFLib) return self.PDFLib;
+    return null;
   }
-  const {
-    PDFDocument,
-    rgb,
-    degrees,
-    StandardFonts,
-    PDFName,
-    PDFHexString,
-    PDFTextField,
-    PDFCheckBox,
-    PDFDropdown,
-    PDFRadioGroup,
-    PDFOptionList,
-    PDFArray,
-    PDFRef,
-  } = PDFLib;
+  function resolvePDFLibEncrypt() {
+    if (PDFLibEncryptArg) return PDFLibEncryptArg;
+    if (typeof window !== 'undefined' && window.PDFLibEncrypt) return window.PDFLibEncrypt;
+    if (typeof globalThis !== 'undefined' && globalThis.PDFLibEncrypt) return globalThis.PDFLibEncrypt;
+    if (typeof self !== 'undefined' && self.PDFLibEncrypt) return self.PDFLibEncrypt;
+    return null;
+  }
+  function resolveJSZip() {
+    if (JSZipArg) return JSZipArg;
+    if (typeof window !== 'undefined' && window.JSZip) return window.JSZip;
+    if (typeof globalThis !== 'undefined' && globalThis.JSZip) return globalThis.JSZip;
+    if (typeof self !== 'undefined' && self.JSZip) return self.JSZip;
+    if (typeof require !== 'undefined') {
+      try { return require('jszip'); } catch (e) {}
+    }
+    return null;
+  }
+
+  let PDFLib = resolvePDFLib();
+  let PDFLibEncrypt = resolvePDFLibEncrypt();
+  let JSZip = resolveJSZip();
+
+  let PDFDocument, rgb, degrees, StandardFonts, PDFName, PDFHexString,
+      PDFTextField, PDFCheckBox, PDFDropdown, PDFRadioGroup, PDFOptionList,
+      PDFArray, PDFRef, decodePDFRawStream;
+
+  function initPDFLibSymbols() {
+    if (!PDFLib) PDFLib = resolvePDFLib();
+    if (!PDFLibEncrypt) PDFLibEncrypt = resolvePDFLibEncrypt();
+    if (!JSZip) JSZip = resolveJSZip();
+
+    if (PDFLib) {
+      if (PDFLibEncrypt && typeof PDFLibEncrypt.configure === 'function') {
+        try { PDFLibEncrypt.configure(PDFLib); } catch (e) {}
+      }
+      PDFDocument = PDFLib.PDFDocument;
+      rgb = PDFLib.rgb;
+      degrees = PDFLib.degrees;
+      StandardFonts = PDFLib.StandardFonts;
+      PDFName = PDFLib.PDFName;
+      PDFHexString = PDFLib.PDFHexString;
+      PDFTextField = PDFLib.PDFTextField;
+      PDFCheckBox = PDFLib.PDFCheckBox;
+      PDFDropdown = PDFLib.PDFDropdown;
+      PDFRadioGroup = PDFLib.PDFRadioGroup;
+      PDFOptionList = PDFLib.PDFOptionList;
+      PDFArray = PDFLib.PDFArray;
+      PDFRef = PDFLib.PDFRef;
+      decodePDFRawStream = PDFLib.decodePDFRawStream;
+    }
+  }
+
+  initPDFLibSymbols();
+
+  function ensurePDFLib() {
+    if (!PDFDocument) {
+      initPDFLibSymbols();
+    }
+    if (!PDFDocument) {
+      throw new Error('PDF-Lib engine is not loaded. Please verify vendor/pdf-lib.min.js is present.');
+    }
+  }
 
   const latin1Decoder = new TextDecoder('latin1');
-  const decodePDFRawStream = PDFLib.decodePDFRawStream;
 
   /**
    * Merge multiple PDF files into a single PDF document.

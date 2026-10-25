@@ -10,17 +10,14 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600&family=Dancing+Script:wght@700&family=Great+Vibes&display=swap" rel="stylesheet">
   
-  <!-- Client-side PDF & Zip dependencies (Local first, CDN fallback) -->
-  <script src="node_modules/pdf-lib/dist/pdf-lib.min.js" onerror="this.onerror=null;this.src='https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js'"></script>
-  <script src="node_modules/jszip/dist/jszip.min.js" onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js'"></script>
-  <script src="node_modules/pdfjs-dist/build/pdf.min.js" onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'"></script>
+  <!-- Client-side PDF & Zip dependencies (Self-contained in vendor/) -->
+  <script src="vendor/pdf-lib.min.js"></script>
+  <script src="vendor/jszip.min.js"></script>
+  <script src="vendor/pdf.min.js"></script>
   <script>
     window.addEventListener('DOMContentLoaded', () => {
       if (window.pdfjsLib && !window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
-        const isLocalDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-        window.pdfjsLib.GlobalWorkerOptions.workerSrc = isLocalDev
-          ? 'node_modules/pdfjs-dist/build/pdf.worker.min.js'
-          : 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
       }
     });
   </script>

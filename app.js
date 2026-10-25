@@ -3,6 +3,7 @@
  * Handles UI interactions, file intake, PDF.js rendering, and PDFCore executions.
  */
 document.addEventListener('DOMContentLoaded', () => {
+  const PDFCore = window.PDFCore || (typeof self !== 'undefined' ? self.PDFCore : null);
   // DOM Elements
   const dashboardView = document.getElementById('dashboardView');
   const workspaceView = document.getElementById('workspaceView');
