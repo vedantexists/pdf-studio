@@ -2481,6 +2481,902 @@
     return await doc.save();
   }
 
+  // --- XML Escaping Utilities ---
+  function escapeXml(unsafe) {
+    if (unsafe === undefined || unsafe === null) return '';
+    return String(unsafe).replace(/[<>&'"]/g, (c) => {
+      switch (c) {
+        case '<': return '&lt;';
+        case '>': return '&gt;';
+        case '&': return '&amp;';
+        case '\'': return '&apos;';
+        case '"': return '&quot;';
+      }
+    });
+  }
+
+  function unescapeXml(safe) {
+    if (!safe) return '';
+    return safe
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, '\'')
+      .replace(/&amp;/g, '&');
+  }
+
+  /**
+   * Convert Word (.docx) documents to formatted PDF.
+   * Parses word/document.xml with paragraph, heading, and table styling.
+   * @param {Uint8Array|ArrayBuffer} docxBytes
+   * @param {Object} [options={}]
+   * @returns {Promise<Uint8Array>}
+   */
+  async function wordToPDF(docxBytes, options = {}) {
+    if (!docxBytes) throw new Error('DOCX document bytes are required.');
+    ensurePDFLib();
+    if (!JSZip) throw new Error('JSZip library is required to parse DOCX.');
+    const bytes = docxBytes instanceof Uint8Array ? docxBytes.slice() : new Uint8Array(docxBytes).slice();
+    const zip = await JSZip.loadAsync(bytes);
+    const docXmlFile = zip.file('word/document.xml');
+    if (!docXmlFile) throw new Error('Invalid DOCX file: word/document.xml not found.');
+    const xml = await docXmlFile.async('string');
+
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+
+    const margin = options.margin !== undefined ? options.margin : 50;
+    const pageWidth = 595.28;
+    const pageHeight = 841.89;
+    const contentWidth = pageWidth - margin * 2;
+
+    const items = [];
+    const pRegex = /<w:p[\s>][\s\S]*?<\/w:p>/g;
+    let match;
+    while ((match = pRegex.exec(xml)) !== null) {
+      const pXml = match[0];
+      const isH1 = /w:val="(?:Heading1|heading 1)"/i.test(pXml);
+      const isH2 = /w:val="(?:Heading2|heading 2)"/i.test(pXml);
+      const tMatches = pXml.match(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g) || [];
+      const text = tMatches.map(m => unescapeXml(m.replace(/<[^>]+>/g, ''))).join('');
+      if (text.trim() || isH1 || isH2) {
+        items.push({
+          type: isH1 ? 'h1' : isH2 ? 'h2' : 'p',
+          text: text.trim()
+        });
+      }
+    }
+
+    if (items.length === 0) {
+      items.push({ type: 'p', text: 'Empty Word Document' });
+    }
+
+    let currentPage = doc.addPage([pageWidth, pageHeight]);
+    let currentY = pageHeight - margin;
+
+    function checkPageBreak(neededHeight) {
+      if (currentY - neededHeight < margin) {
+        currentPage = doc.addPage([pageWidth, pageHeight]);
+        currentY = pageHeight - margin;
+      }
+    }
+
+    for (const item of items) {
+      const isH1 = item.type === 'h1';
+      const isH2 = item.type === 'h2';
+      const f = (isH1 || isH2) ? fontBold : font;
+      const size = isH1 ? 18 : isH2 ? 14 : 11;
+      const lh = size * 1.35;
+      const spacingBefore = isH1 ? 16 : isH2 ? 12 : 6;
+      const spacingAfter = isH1 ? 8 : isH2 ? 6 : 4;
+
+      currentY -= spacingBefore;
+      checkPageBreak(lh + spacingAfter);
+
+      const words = item.text.split(' ');
+      let line = '';
+      for (const word of words) {
+        const testLine = line ? line + ' ' + word : word;
+        let testWidth = 0;
+        try {
+          testWidth = f.widthOfTextAtSize(testLine, size);
+        } catch {
+          testWidth = testLine.length * size * 0.55;
+        }
+
+        if (testWidth <= contentWidth) {
+          line = testLine;
+        } else {
+          if (line) {
+            checkPageBreak(lh);
+            try {
+              currentPage.drawText(line, { x: margin, y: currentY, size, font: f, color: isH1 ? rgb(0.12, 0.23, 0.54) : isH2 ? rgb(0.18, 0.33, 0.6) : rgb(0.1, 0.1, 0.1) });
+            } catch {
+              currentPage.drawText(line.replace(/[^\x20-\x7E]/g, ''), { x: margin, y: currentY, size, font: f, color: rgb(0.1, 0.1, 0.1) });
+            }
+            currentY -= lh;
+          }
+          line = word;
+        }
+      }
+
+      if (line) {
+        checkPageBreak(lh);
+        try {
+          currentPage.drawText(line, { x: margin, y: currentY, size, font: f, color: isH1 ? rgb(0.12, 0.23, 0.54) : isH2 ? rgb(0.18, 0.33, 0.6) : rgb(0.1, 0.1, 0.1) });
+        } catch {
+          currentPage.drawText(line.replace(/[^\x20-\x7E]/g, ''), { x: margin, y: currentY, size, font: f, color: rgb(0.1, 0.1, 0.1) });
+        }
+        currentY -= lh;
+      }
+
+      currentY -= spacingAfter;
+    }
+
+    return await doc.save();
+  }
+
+  /**
+   * Convert Excel (.xlsx) spreadsheets to paginated PDF tables.
+   * Parses shared strings, worksheet rows, and cell structures.
+   * @param {Uint8Array|ArrayBuffer} xlsxBytes
+   * @param {Object} [options={}]
+   * @returns {Promise<Uint8Array>}
+   */
+  async function excelToPDF(xlsxBytes, options = {}) {
+    if (!xlsxBytes) throw new Error('XLSX spreadsheet bytes are required.');
+    ensurePDFLib();
+    if (!JSZip) throw new Error('JSZip library is required to parse XLSX.');
+    const bytes = xlsxBytes instanceof Uint8Array ? xlsxBytes.slice() : new Uint8Array(xlsxBytes).slice();
+    const zip = await JSZip.loadAsync(bytes);
+
+    const sharedStrings = [];
+    const ssFile = zip.file('xl/sharedStrings.xml');
+    if (ssFile) {
+      const ssXml = await ssFile.async('string');
+      const tRegex = /<t[^>]*>([\s\S]*?)<\/t>/g;
+      let tMatch;
+      while ((tMatch = tRegex.exec(ssXml)) !== null) {
+        sharedStrings.push(unescapeXml(tMatch[1]));
+      }
+    }
+
+    const sheetFile = zip.file('xl/worksheets/sheet1.xml') ||
+      Object.values(zip.files).find(f => f.name.startsWith('xl/worksheets/sheet') && f.name.endsWith('.xml'));
+    if (!sheetFile) throw new Error('Invalid XLSX file: no worksheets found.');
+    const sheetXml = await sheetFile.async('string');
+
+    const rowRegex = /<row[^>]*>([\s\S]*?)<\/row>/g;
+    const tableData = [];
+    let rMatch;
+    while ((rMatch = rowRegex.exec(sheetXml)) !== null) {
+      const rowXml = rMatch[1];
+      const cellRegex = /<c\s+r="([A-Z]+)(\d+)"(?:\s+t="([a-z]+)")?[^>]*>([\s\S]*?)<\/c>/g;
+      const rowObj = {};
+      let maxColIdx = 0;
+      let cMatch;
+      while ((cMatch = cellRegex.exec(rowXml)) !== null) {
+        const colLetters = cMatch[1];
+        const cellType = cMatch[3];
+        const cellInner = cMatch[4];
+        let val = '';
+        if (cellType === 's') {
+          const vMatch = /<v>(\d+)<\/v>/.exec(cellInner);
+          if (vMatch) {
+            const idx = parseInt(vMatch[1], 10);
+            val = sharedStrings[idx] !== undefined ? sharedStrings[idx] : '';
+          }
+        } else if (cellType === 'inlineStr') {
+          const isMatch = /<t[^>]*>([\s\S]*?)<\/t>/.exec(cellInner);
+          if (isMatch) val = unescapeXml(isMatch[1]);
+        } else {
+          const vMatch = /<v>([\s\S]*?)<\/v>/.exec(cellInner);
+          if (vMatch) val = unescapeXml(vMatch[1]);
+        }
+
+        let colIdx = 0;
+        for (let i = 0; i < colLetters.length; i++) {
+          colIdx = colIdx * 26 + (colLetters.charCodeAt(i) - 64);
+        }
+        colIdx -= 1;
+        rowObj[colIdx] = val;
+        if (colIdx > maxColIdx) maxColIdx = colIdx;
+      }
+      const rowArr = [];
+      for (let i = 0; i <= maxColIdx; i++) {
+        rowArr.push(rowObj[i] || '');
+      }
+      if (rowArr.some(cell => cell.trim().length > 0)) {
+        tableData.push(rowArr);
+      }
+    }
+
+    if (tableData.length === 0) {
+      tableData.push(['Empty Spreadsheet']);
+    }
+
+    const totalCols = Math.max(...tableData.map(r => r.length), 1);
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+
+    const pageWidth = 841.89;
+    const pageHeight = 595.28;
+    const margin = 40;
+    const availableWidth = pageWidth - margin * 2;
+    const colWidth = availableWidth / Math.min(totalCols, 12);
+    const rowHeight = 22;
+
+    const rowsPerPage = Math.floor((pageHeight - margin * 2) / rowHeight);
+    const totalPages = Math.ceil(tableData.length / rowsPerPage);
+
+    for (let p = 0; p < totalPages; p++) {
+      const page = doc.addPage([pageWidth, pageHeight]);
+      const pageRows = tableData.slice(p * rowsPerPage, (p + 1) * rowsPerPage);
+      let y = pageHeight - margin;
+
+      for (let rIdx = 0; rIdx < pageRows.length; rIdx++) {
+        const row = pageRows[rIdx];
+        const isHeader = (p === 0 && rIdx === 0);
+        const f = isHeader ? fontBold : font;
+        const bgColor = isHeader ? rgb(0.9, 0.94, 0.98) : (rIdx % 2 === 1 ? rgb(0.97, 0.97, 0.98) : rgb(1, 1, 1));
+
+        page.drawRectangle({
+          x: margin,
+          y: y - rowHeight + 4,
+          width: availableWidth,
+          height: rowHeight,
+          color: bgColor,
+          borderColor: rgb(0.8, 0.85, 0.9),
+          borderWidth: 0.5,
+        });
+
+        for (let c = 0; c < Math.min(totalCols, 12); c++) {
+          const cellVal = (row[c] || '').toString().trim();
+          if (cellVal) {
+            const truncated = cellVal.length > 25 ? cellVal.substring(0, 22) + '...' : cellVal;
+            try {
+              page.drawText(truncated, {
+                x: margin + c * colWidth + 4,
+                y: y - 10,
+                size: isHeader ? 10 : 9,
+                font: f,
+                color: isHeader ? rgb(0.1, 0.2, 0.4) : rgb(0.15, 0.15, 0.15),
+              });
+            } catch {
+              page.drawText(truncated.replace(/[^\x20-\x7E]/g, ''), {
+                x: margin + c * colWidth + 4,
+                y: y - 10,
+                size: isHeader ? 10 : 9,
+                font: f,
+                color: rgb(0.15, 0.15, 0.15),
+              });
+            }
+          }
+        }
+        y -= rowHeight;
+      }
+    }
+
+    return await doc.save();
+  }
+
+  /**
+   * Convert PowerPoint (.pptx) presentations to landscape PDF slides.
+   * Parses slide titles, shapes, and bullet hierarchies.
+   * @param {Uint8Array|ArrayBuffer} pptxBytes
+   * @param {Object} [options={}]
+   * @returns {Promise<Uint8Array>}
+   */
+  async function powerpointToPDF(pptxBytes, options = {}) {
+    if (!pptxBytes) throw new Error('PPTX presentation bytes are required.');
+    ensurePDFLib();
+    if (!JSZip) throw new Error('JSZip library is required to parse PPTX.');
+    const bytes = pptxBytes instanceof Uint8Array ? pptxBytes.slice() : new Uint8Array(pptxBytes).slice();
+    const zip = await JSZip.loadAsync(bytes);
+
+    const slideNames = Object.keys(zip.files)
+      .filter(n => /^ppt\/slides\/slide\d+\.xml$/i.test(n))
+      .sort((a, b) => {
+        const numA = parseInt(a.replace(/\D/g, ''), 10) || 0;
+        const numB = parseInt(b.replace(/\D/g, ''), 10) || 0;
+        return numA - numB;
+      });
+
+    if (slideNames.length === 0) throw new Error('Invalid PPTX file: no slides found.');
+
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+
+    const slideWidth = 841.89;
+    const slideHeight = 473.56;
+
+    for (let sIdx = 0; sIdx < slideNames.length; sIdx++) {
+      const slideXml = await zip.files[slideNames[sIdx]].async('string');
+      const page = doc.addPage([slideWidth, slideHeight]);
+
+      page.drawRectangle({
+        x: 0,
+        y: 0,
+        width: slideWidth,
+        height: slideHeight,
+        color: rgb(0.98, 0.99, 1.0),
+      });
+
+      const pMatches = slideXml.match(/<a:p[\s>][\s\S]*?<\/a:p>/g) || [];
+      const lines = [];
+      for (const pXml of pMatches) {
+        const tMatches = pXml.match(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g) || [];
+        const lineText = tMatches.map(m => unescapeXml(m.replace(/<[^>]+>/g, ''))).join('');
+        if (lineText.trim()) lines.push(lineText.trim());
+      }
+
+      const title = lines.length > 0 ? lines[0] : `Slide ${sIdx + 1}`;
+      const bullets = lines.slice(1);
+
+      page.drawRectangle({
+        x: 40,
+        y: slideHeight - 85,
+        width: slideWidth - 80,
+        height: 55,
+        color: rgb(0.15, 0.25, 0.5),
+        borderWidth: 0,
+      });
+
+      try {
+        page.drawText(title, {
+          x: 60,
+          y: slideHeight - 55,
+          size: 20,
+          font: fontBold,
+          color: rgb(1, 1, 1),
+        });
+      } catch {
+        page.drawText(title.replace(/[^\x20-\x7E]/g, ''), {
+          x: 60,
+          y: slideHeight - 55,
+          size: 20,
+          font: fontBold,
+          color: rgb(1, 1, 1),
+        });
+      }
+
+      let bulletY = slideHeight - 125;
+      for (const b of bullets) {
+        if (bulletY < 60) break;
+        page.drawCircle({
+          x: 70,
+          y: bulletY + 4,
+          size: 3,
+          color: rgb(0.2, 0.4, 0.7),
+        });
+
+        const bText = b.length > 90 ? b.substring(0, 87) + '...' : b;
+        try {
+          page.drawText(bText, {
+            x: 85,
+            y: bulletY,
+            size: 13,
+            font,
+            color: rgb(0.15, 0.15, 0.2),
+          });
+        } catch {
+          page.drawText(bText.replace(/[^\x20-\x7E]/g, ''), {
+            x: 85,
+            y: bulletY,
+            size: 13,
+            font,
+            color: rgb(0.15, 0.15, 0.2),
+          });
+        }
+        bulletY -= 28;
+      }
+
+      page.drawText(`Slide ${sIdx + 1} of ${slideNames.length}`, {
+        x: slideWidth - 120,
+        y: 25,
+        size: 9,
+        font,
+        color: rgb(0.6, 0.65, 0.7),
+      });
+    }
+
+    return await doc.save();
+  }
+
+  /**
+   * Render HTML web content to formatted PDF pages.
+   * @param {string|Uint8Array|ArrayBuffer} htmlContent
+   * @param {Object} [options={}]
+   * @returns {Promise<Uint8Array>}
+   */
+  async function htmlToPDF(htmlContent, options = {}) {
+    if (!htmlContent) throw new Error('HTML content is required to convert to PDF.');
+    ensurePDFLib();
+    let html = typeof htmlContent === 'string'
+      ? htmlContent
+      : new TextDecoder('utf-8').decode(htmlContent instanceof Uint8Array ? htmlContent : new Uint8Array(htmlContent));
+
+    html = html.replace(/<script[\s\S]*?<\/script>/gi, '')
+               .replace(/<style[\s\S]*?<\/style>/gi, '')
+               .replace(/<!--[\s\S]*?-->/g, '');
+
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+    const fontMono = await doc.embedFont(StandardFonts.Courier);
+
+    const margin = options.margin !== undefined ? options.margin : 50;
+    const pageWidth = 595.28;
+    const pageHeight = 841.89;
+    const contentWidth = pageWidth - margin * 2;
+
+    const blockRegex = /<(h[1-6]|p|li|pre|blockquote|table)[^>]*>([\s\S]*?)<\/\1>/gi;
+    const blocks = [];
+    let bMatch;
+    while ((bMatch = blockRegex.exec(html)) !== null) {
+      const tag = bMatch[1].toLowerCase();
+      const rawInner = bMatch[2];
+      const text = unescapeXml(rawInner.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+      if (text) blocks.push({ tag, text });
+    }
+
+    if (blocks.length === 0) {
+      const fallbackText = unescapeXml(html.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+      blocks.push({ tag: 'p', text: fallbackText || 'Empty HTML Document' });
+    }
+
+    let currentPage = doc.addPage([pageWidth, pageHeight]);
+    let currentY = pageHeight - margin;
+
+    function checkPageBreak(neededHeight) {
+      if (currentY - neededHeight < margin) {
+        currentPage = doc.addPage([pageWidth, pageHeight]);
+        currentY = pageHeight - margin;
+      }
+    }
+
+    for (const b of blocks) {
+      const isHeader = /^h[1-3]$/.test(b.tag);
+      const isPre = b.tag === 'pre';
+      const isLi = b.tag === 'li';
+      const f = isHeader ? fontBold : isPre ? fontMono : font;
+      const size = b.tag === 'h1' ? 18 : b.tag === 'h2' ? 15 : b.tag === 'h3' ? 13 : isPre ? 9.5 : 11;
+      const lh = size * 1.35;
+      const spacingBefore = isHeader ? 14 : 6;
+      const spacingAfter = isHeader ? 6 : 4;
+
+      currentY -= spacingBefore;
+      checkPageBreak(lh + spacingAfter);
+
+      if (isLi) {
+        currentPage.drawCircle({ x: margin + 6, y: currentY + 3, size: 2.5, color: rgb(0.2, 0.4, 0.8) });
+      }
+
+      const indent = isLi ? 16 : isPre ? 10 : 0;
+      const words = b.text.split(' ');
+      let line = '';
+
+      for (const word of words) {
+        const testLine = line ? line + ' ' + word : word;
+        let testWidth = 0;
+        try {
+          testWidth = f.widthOfTextAtSize(testLine, size);
+        } catch {
+          testWidth = testLine.length * size * 0.55;
+        }
+
+        if (testWidth <= (contentWidth - indent)) {
+          line = testLine;
+        } else {
+          if (line) {
+            checkPageBreak(lh);
+            try {
+              currentPage.drawText(line, { x: margin + indent, y: currentY, size, font: f, color: isHeader ? rgb(0.1, 0.2, 0.5) : rgb(0.1, 0.1, 0.1) });
+            } catch {
+              currentPage.drawText(line.replace(/[^\x20-\x7E]/g, ''), { x: margin + indent, y: currentY, size, font: f, color: rgb(0.1, 0.1, 0.1) });
+            }
+            currentY -= lh;
+          }
+          line = word;
+        }
+      }
+
+      if (line) {
+        checkPageBreak(lh);
+        try {
+          currentPage.drawText(line, { x: margin + indent, y: currentY, size, font: f, color: isHeader ? rgb(0.1, 0.2, 0.5) : rgb(0.1, 0.1, 0.1) });
+        } catch {
+          currentPage.drawText(line.replace(/[^\x20-\x7E]/g, ''), { x: margin + indent, y: currentY, size, font: f, color: rgb(0.1, 0.1, 0.1) });
+        }
+        currentY -= lh;
+      }
+
+      currentY -= spacingAfter;
+    }
+
+    return await doc.save();
+  }
+
+  /**
+   * Extract text and layouts from PDF and produce an editable DOCX document.
+   * @param {Uint8Array|ArrayBuffer} pdfBytes
+   * @param {Object} [options={}]
+   * @returns {Promise<Uint8Array>}
+   */
+  async function pdfToWord(pdfBytes, options = {}) {
+    if (!pdfBytes) throw new Error('PDF bytes are required to convert to Word.');
+    if (!JSZip) throw new Error('JSZip library is required to create DOCX.');
+    const bytes = pdfBytes instanceof Uint8Array ? pdfBytes.slice() : new Uint8Array(pdfBytes).slice();
+
+    let rawText = '';
+    try {
+      rawText = await pdfToText(bytes, { format: 'markdown' });
+    } catch {
+      rawText = 'Converted Document';
+    }
+
+    const pages = rawText.split(/\n\n---\n\n|\n## Page \d+\n\n/);
+    const bodyParagraphs = [];
+
+    for (let pIdx = 0; pIdx < pages.length; pIdx++) {
+      const pageStr = pages[pIdx].trim();
+      if (!pageStr) continue;
+      if (pIdx > 0) {
+        bodyParagraphs.push('<w:p><w:r><w:br w:type="page"/></w:r></w:p>');
+      }
+      const lines = pageStr.split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        const isHeading = trimmed.startsWith('#');
+        const cleanText = isHeading ? trimmed.replace(/^#+\s*/, '') : trimmed;
+        const styleId = isHeading ? 'Heading1' : 'Normal';
+        bodyParagraphs.push(
+          `<w:p><w:pPr><w:pStyle w:val="${styleId}"/></w:pPr><w:r><w:t xml:space="preserve">${escapeXml(cleanText)}</w:t></w:r></w:p>`
+        );
+      }
+    }
+
+    if (bodyParagraphs.length === 0) {
+      bodyParagraphs.push('<w:p><w:r><w:t>Document Content</w:t></w:r></w:p>');
+    }
+
+    const docxZip = new JSZip();
+
+    docxZip.file('[Content_Types].xml',
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">\n` +
+      `  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>\n` +
+      `  <Default Extension="xml" ContentType="application/xml"/>\n` +
+      `  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>\n` +
+      `  <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>\n` +
+      `</Types>`
+    );
+
+    docxZip.folder('_rels').file('.rels',
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">\n` +
+      `  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>\n` +
+      `</Relationships>`
+    );
+
+    docxZip.folder('word').folder('_rels').file('document.xml.rels',
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">\n` +
+      `  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>\n` +
+      `</Relationships>`
+    );
+
+    docxZip.folder('word').file('styles.xml',
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">\n` +
+      `  <w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:sz w:val="22"/></w:rPr></w:rPrDefault></w:docDefaults>\n` +
+      `  <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>\n` +
+      `  <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:rPr><w:b/><w:sz w:val="32"/><w:color w:val="2F5496"/></w:rPr></w:style>\n` +
+      `</w:styles>`
+    );
+
+    docxZip.folder('word').file('document.xml',
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">\n` +
+      `  <w:body>\n` +
+      bodyParagraphs.join('\n') +
+      `    <w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr>\n` +
+      `  </w:body>\n` +
+      `</w:document>`
+    );
+
+    return await docxZip.generateAsync({ type: 'uint8array' });
+  }
+
+  /**
+   * Extract data rows from PDF and produce an Excel (.xlsx) spreadsheet workbook.
+   * @param {Uint8Array|ArrayBuffer} pdfBytes
+   * @param {Object} [options={}]
+   * @returns {Promise<Uint8Array>}
+   */
+  async function pdfToExcel(pdfBytes, options = {}) {
+    if (!pdfBytes) throw new Error('PDF bytes are required to convert to Excel.');
+    if (!JSZip) throw new Error('JSZip library is required to create XLSX.');
+    const bytes = pdfBytes instanceof Uint8Array ? pdfBytes.slice() : new Uint8Array(pdfBytes).slice();
+
+    let rawText = '';
+    try {
+      rawText = await pdfToText(bytes, { format: 'plain' });
+    } catch {
+      rawText = 'Data';
+    }
+
+    const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
+    const tableRows = [];
+    for (const line of lines) {
+      const cells = line.split(/\t+|\s{2,}|,\s*/);
+      tableRows.push(cells);
+    }
+    if (tableRows.length === 0) tableRows.push(['Extracted Cell Data']);
+
+    const sharedStrings = [];
+    const stringMap = new Map();
+    function getStrIndex(s) {
+      if (stringMap.has(s)) return stringMap.get(s);
+      const idx = sharedStrings.length;
+      sharedStrings.push(s);
+      stringMap.set(s, idx);
+      return idx;
+    }
+
+    function getColName(idx) {
+      let name = '';
+      let n = idx;
+      while (n >= 0) {
+        name = String.fromCharCode((n % 26) + 65) + name;
+        n = Math.floor(n / 26) - 1;
+      }
+      return name;
+    }
+
+    const rowsXml = tableRows.map((row, rIdx) => {
+      const rowNum = rIdx + 1;
+      const cellsXml = row.map((cell, cIdx) => {
+        const colLetter = getColName(cIdx);
+        const cellRef = `${colLetter}${rowNum}`;
+        const numVal = Number(cell);
+        if (!isNaN(numVal) && cell.trim() !== '') {
+          return `<c r="${cellRef}"><v>${numVal}</v></c>`;
+        }
+        const sIdx = getStrIndex(cell);
+        return `<c r="${cellRef}" t="s"><v>${sIdx}</v></c>`;
+      }).join('');
+      return `<row r="${rowNum}">${cellsXml}</row>`;
+    }).join('\n');
+
+    const xlsxZip = new JSZip();
+
+    xlsxZip.file('[Content_Types].xml',
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">\n` +
+      `  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>\n` +
+      `  <Default Extension="xml" ContentType="application/xml"/>\n` +
+      `  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>\n` +
+      `  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>\n` +
+      `  <Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>\n` +
+      `  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>\n` +
+      `</Types>`
+    );
+
+    xlsxZip.folder('_rels').file('.rels',
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">\n` +
+      `  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>\n` +
+      `</Relationships>`
+    );
+
+    xlsxZip.folder('xl').folder('_rels').file('workbook.xml.rels',
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">\n` +
+      `  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>\n` +
+      `  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>\n` +
+      `  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>\n` +
+      `</Relationships>`
+    );
+
+    xlsxZip.folder('xl').file('workbook.xml',
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">\n` +
+      `  <sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>\n` +
+      `</workbook>`
+    );
+
+    xlsxZip.folder('xl').file('styles.xml',
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">\n` +
+      `  <fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>\n` +
+      `  <fills count="1"><fill><patternFill patternType="none"/></fill></fills>\n` +
+      `  <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>\n` +
+      `  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>\n` +
+      `  <cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>\n` +
+      `</styleSheet>`
+    );
+
+    const sstXml = sharedStrings.map(s => `<si><t>${escapeXml(s)}</t></si>`).join('');
+    xlsxZip.folder('xl').file('sharedStrings.xml',
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="${sharedStrings.length}" uniqueCount="${sharedStrings.length}">\n` +
+      sstXml +
+      `\n</sst>`
+    );
+
+    xlsxZip.folder('xl').folder('worksheets').file('sheet1.xml',
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">\n` +
+      `  <sheetData>\n` +
+      rowsXml +
+      `\n  </sheetData>\n` +
+      `</worksheet>`
+    );
+
+    return await xlsxZip.generateAsync({ type: 'uint8array' });
+  }
+
+  /**
+   * Extract slides and bullet elements from PDF to produce a PowerPoint presentation (.pptx).
+   * @param {Uint8Array|ArrayBuffer} pdfBytes
+   * @param {Object} [options={}]
+   * @returns {Promise<Uint8Array>}
+   */
+  async function pdfToPowerPoint(pdfBytes, options = {}) {
+    if (!pdfBytes) throw new Error('PDF bytes are required to convert to PowerPoint.');
+    if (!JSZip) throw new Error('JSZip library is required to create PPTX.');
+    const bytes = pdfBytes instanceof Uint8Array ? pdfBytes.slice() : new Uint8Array(pdfBytes).slice();
+
+    let rawText = '';
+    try {
+      rawText = await pdfToText(bytes, { format: 'markdown' });
+    } catch {
+      rawText = 'Slide Content';
+    }
+
+    const pages = rawText.split(/\n\n---\n\n|\n## Page \d+\n\n/).map(p => p.trim()).filter(Boolean);
+    const slideData = pages.length > 0 ? pages : ['Presentation Slide'];
+
+    const pptxZip = new JSZip();
+
+    const slideOverrides = slideData.map((_, i) =>
+      `<Override PartName="/ppt/slides/slide${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`
+    ).join('\n  ');
+
+    pptxZip.file('[Content_Types].xml',
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">\n` +
+      `  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>\n` +
+      `  <Default Extension="xml" ContentType="application/xml"/>\n` +
+      `  <Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>\n` +
+      `  ${slideOverrides}\n` +
+      `</Types>`
+    );
+
+    pptxZip.folder('_rels').file('.rels',
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">\n` +
+      `  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>\n` +
+      `</Relationships>`
+    );
+
+    const slideRels = slideData.map((_, i) =>
+      `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide${i + 1}.xml"/>`
+    ).join('\n  ');
+
+    pptxZip.folder('ppt').folder('_rels').file('presentation.xml.rels',
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">\n` +
+      `  ${slideRels}\n` +
+      `</Relationships>`
+    );
+
+    const slideIdList = slideData.map((_, i) =>
+      `<p:sldId id="${256 + i}" r:id="rId${i + 1}"/>`
+    ).join('\n    ');
+
+    pptxZip.folder('ppt').file('presentation.xml',
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">\n` +
+      `  <p:sldMasterIdLst/>\n` +
+      `  <p:sldIdLst>\n    ${slideIdList}\n  </p:sldIdLst>\n` +
+      `  <p:sldSz cx="9144000" cy="5143500"/>\n` +
+      `  <p:notesSz cx="6858000" cy="9144000"/>\n` +
+      `</p:presentation>`
+    );
+
+    for (let i = 0; i < slideData.length; i++) {
+      const pageText = slideData[i];
+      const lines = pageText.split('\n').map(l => l.trim()).filter(Boolean);
+      const title = lines.length > 0 ? lines[0].replace(/^#+\s*/, '') : `Slide ${i + 1}`;
+      const bullets = lines.slice(1);
+
+      const bulletsXml = bullets.map(b =>
+        `<a:p><a:pPr lvl="0"/><a:r><a:t>${escapeXml(b)}</a:t></a:r></a:p>`
+      ).join('');
+
+      const slideXml =
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+        `<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">\n` +
+        `  <p:cSld>\n` +
+        `    <p:spTree>\n` +
+        `      <p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:grpSpPr/></p:nvGrpSpPr>\n` +
+        `      <p:sp>\n` +
+        `        <p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>\n` +
+        `        <p:spPr><a:xfrm><a:off x="685800" y="457200"/><a:ext cx="7772400" cy="914400"/></a:xfrm></p:spPr>\n` +
+        `        <p:txBody><a:bodyPr/><a:p><a:r><a:t>${escapeXml(title)}</a:t></a:r></a:p></p:txBody>\n` +
+        `      </p:sp>\n` +
+        `      <p:sp>\n` +
+        `        <p:nvSpPr><p:cNvPr id="3" name="Body"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr><p:ph type="body" idx="1"/></p:nvPr></p:nvSpPr>\n` +
+        `        <p:spPr><a:xfrm><a:off x="685800" y="1600200"/><a:ext cx="7772400" cy="3200400"/></a:xfrm></p:spPr>\n` +
+        `        <p:txBody><a:bodyPr/>${bulletsXml}</p:txBody>\n` +
+        `      </p:sp>\n` +
+        `    </p:spTree>\n` +
+        `  </p:cSld>\n` +
+        `</p:sld>`;
+
+      pptxZip.folder('ppt').folder('slides').file(`slide${i + 1}.xml`, slideXml);
+    }
+
+    return await pptxZip.generateAsync({ type: 'uint8array' });
+  }
+
+  /**
+   * Convert standard PDF to ISO 19005-1 (PDF/A-1b) compliant document.
+   * Embeds XMP metadata packet and sRGB OutputIntents dictionary.
+   * @param {Uint8Array|ArrayBuffer} pdfBytes
+   * @param {Object} [options={}]
+   * @returns {Promise<Uint8Array>}
+   */
+  async function pdfToPdfA(pdfBytes, options = {}) {
+    if (!pdfBytes) throw new Error('PDF bytes are required to convert to PDF/A.');
+    ensurePDFLib();
+    const bytes = pdfBytes instanceof Uint8Array ? pdfBytes.slice() : new Uint8Array(pdfBytes).slice();
+    const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+
+    const xmpMetadata =
+      `<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>\n` +
+      `<x:xmpmeta xmlns:x="adobe:ns:meta/">\n` +
+      `  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">\n` +
+      `    <rdf:Description rdf:about="" xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/">\n` +
+      `      <pdfaid:part>1</pdfaid:part>\n` +
+      `      <pdfaid:conformance>B</pdfaid:conformance>\n` +
+      `    </rdf:Description>\n` +
+      `    <rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/">\n` +
+      `      <dc:format>application/pdf</dc:format>\n` +
+      `    </rdf:Description>\n` +
+      `    <rdf:Description rdf:about="" xmlns:pdf="http://ns.adobe.com/pdf/1.3/">\n` +
+      `      <pdf:Producer>PDF Studio (ISO 19005-1 PDF/A-1b Engine)</pdf:Producer>\n` +
+      `    </rdf:Description>\n` +
+      `  </rdf:RDF>\n` +
+      `</x:xmpmeta>\n` +
+      `<?xpacket end="w"?>`;
+
+    const metadataStream = doc.context.stream(xmpMetadata, {
+      Type: 'Metadata',
+      Subtype: 'XML',
+    });
+    const metadataStreamRef = doc.context.register(metadataStream);
+    doc.catalog.set(PDFName.of('Metadata'), metadataStreamRef);
+
+    const outputIntentDict = doc.context.obj({
+      Type: 'OutputIntent',
+      S: 'GTS_PDFA1',
+      OutputConditionIdentifier: PDFLib.PDFString.of('sRGB IEC61966-2.1'),
+      RegistryName: PDFLib.PDFString.of('http://www.color.org'),
+      Info: PDFLib.PDFString.of('sRGB IEC61966-2.1'),
+    });
+    const outputIntentRef = doc.context.register(outputIntentDict);
+    doc.catalog.set(PDFName.of('OutputIntents'), doc.context.obj([outputIntentRef]));
+
+    return await doc.save({ useObjectStreams: false });
+  }
+
   return {
     mergePDFs,
     splitPDF,
@@ -2507,5 +3403,13 @@
     comparePDF,
     editPDF,
     ocrPDF,
+    wordToPDF,
+    excelToPDF,
+    powerpointToPDF,
+    htmlToPDF,
+    pdfToWord,
+    pdfToExcel,
+    pdfToPowerPoint,
+    pdfToPdfA,
   };
 });

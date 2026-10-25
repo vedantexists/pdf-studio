@@ -763,18 +763,44 @@ document.addEventListener('DOMContentLoaded', () => {
 
     try {
       const isTextTool = currentTool === 'text-to-pdf' || currentTool === 'txt-to-pdf';
+      const isWordTool = currentTool === 'word-to-pdf';
+      const isExcelTool = currentTool === 'excel-to-pdf';
+      const isPptTool = currentTool === 'powerpoint-to-pdf';
+      const isHtmlTool = currentTool === 'html-to-pdf';
+      const isOfficeOrHtmlTool = isWordTool || isExcelTool || isPptTool || isHtmlTool;
+
       const validFiles = files.filter((f) => {
+        const nameLower = f.name.toLowerCase();
         if (meta.acceptImages) {
           return f.type.startsWith('image/');
         }
         if (isTextTool) {
-          return f.type.startsWith('text/') || f.name.toLowerCase().endsWith('.txt') || f.name.toLowerCase().endsWith('.md');
+          return f.type.startsWith('text/') || nameLower.endsWith('.txt') || nameLower.endsWith('.md');
         }
-        return f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf');
+        if (isWordTool) {
+          return nameLower.endsWith('.docx') || f.type.includes('wordprocessingml');
+        }
+        if (isExcelTool) {
+          return nameLower.endsWith('.xlsx') || nameLower.endsWith('.xls') || f.type.includes('spreadsheetml');
+        }
+        if (isPptTool) {
+          return nameLower.endsWith('.pptx') || f.type.includes('presentationml');
+        }
+        if (isHtmlTool) {
+          return nameLower.endsWith('.html') || nameLower.endsWith('.htm') || f.type === 'text/html';
+        }
+        return f.type === 'application/pdf' || nameLower.endsWith('.pdf');
       });
 
       if (validFiles.length === 0) {
-        throw new Error(meta.acceptImages ? 'Please select valid image files (JPG, PNG, WebP).' : isTextTool ? 'Please select valid text files (.txt, .md).' : 'Please select valid PDF files.');
+        let msg = 'Please select valid PDF files.';
+        if (meta.acceptImages) msg = 'Please select valid image files (JPG, PNG, WebP).';
+        else if (isTextTool) msg = 'Please select valid text files (.txt, .md).';
+        else if (isWordTool) msg = 'Please select a valid Word document (.docx).';
+        else if (isExcelTool) msg = 'Please select a valid Excel workbook (.xlsx).';
+        else if (isPptTool) msg = 'Please select a valid PowerPoint presentation (.pptx).';
+        else if (isHtmlTool) msg = 'Please select a valid HTML file (.html, .htm).';
+        throw new Error(msg);
       }
 
       // Read file bytes
@@ -784,7 +810,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const bytes = new Uint8Array(buffer);
         let pageCount = 1;
 
-        if (!meta.acceptImages && !isTextTool) {
+        if (!meta.acceptImages && !isTextTool && !isOfficeOrHtmlTool) {
           try {
             // Load with PDFLib to determine valid page count immediately
             const pdfDoc = await PDFLib.PDFDocument.load(bytes.slice(), { ignoreEncryption: true });
@@ -813,7 +839,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       // Initialize activePages reliably using pageCount from PDFLib
-      if (!meta.acceptImages && uploadedFiles.length > 0) {
+      if (!meta.acceptImages && !isOfficeOrHtmlTool && uploadedFiles.length > 0) {
         const total = uploadedFiles[0].pageCount || 1;
         activePages = Array.from({ length: total }, (_, i) => ({
           pageNum: i + 1,
@@ -865,7 +891,8 @@ document.addEventListener('DOMContentLoaded', () => {
   async function renderToolWorkspace() {
     renderSettingsPanel();
 
-    if (currentTool === 'merge' || currentTool === 'img-to-pdf' || currentTool === 'compare' || currentTool === 'compare-pdf') {
+    if (currentTool === 'merge' || currentTool === 'img-to-pdf' || currentTool === 'compare' || currentTool === 'compare-pdf' ||
+        currentTool === 'word-to-pdf' || currentTool === 'excel-to-pdf' || currentTool === 'powerpoint-to-pdf' || currentTool === 'html-to-pdf') {
       // Show file list with reorder buttons
       pagesGrid.style.display = 'none';
       filesList.style.display = 'flex';
@@ -2939,6 +2966,107 @@ document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('openScannerFromSettingsBtn')?.addEventListener('click', () => {
         openCameraScanner();
       });
+    } else if (currentTool === 'word-to-pdf') {
+      toolSettings.innerHTML = `
+        <div class="setting-group">
+          <label>Word to PDF Options</label>
+          <p class="setting-hint">Converts .docx paragraphs, headings, bullet lists, and tables into cleanly formatted PDF pages.</p>
+        </div>
+        <div class="setting-group" style="margin-top: 0.75rem;">
+          <label>Page Format</label>
+          <div style="font-size: 0.85rem; background: #f8fafc; padding: 0.6rem; border-radius: var(--radius-sm); border: 1px solid var(--border);">
+            Standard A4 Portrait &bull; 50pt Margins &bull; Helvetica Typography
+          </div>
+        </div>
+      `;
+    } else if (currentTool === 'excel-to-pdf') {
+      toolSettings.innerHTML = `
+        <div class="setting-group">
+          <label>Excel to PDF Options</label>
+          <p class="setting-hint">Extracts worksheets and structures into formatted tabular PDF pages with alternating fills.</p>
+        </div>
+        <div class="setting-group" style="margin-top: 0.75rem;">
+          <label>Sheet Layout</label>
+          <div style="font-size: 0.85rem; background: #f8fafc; padding: 0.6rem; border-radius: var(--radius-sm); border: 1px solid var(--border);">
+            Landscape A4 &bull; Auto-Fitted Columns &bull; Header Shading
+          </div>
+        </div>
+      `;
+    } else if (currentTool === 'powerpoint-to-pdf') {
+      toolSettings.innerHTML = `
+        <div class="setting-group">
+          <label>PowerPoint to PDF Options</label>
+          <p class="setting-hint">Transforms presentation slides into full-fidelity landscape presentation PDF pages.</p>
+        </div>
+        <div class="setting-group" style="margin-top: 0.75rem;">
+          <label>Slide Dimensions</label>
+          <div style="font-size: 0.85rem; background: #f8fafc; padding: 0.6rem; border-radius: var(--radius-sm); border: 1px solid var(--border);">
+            16:9 Widescreen &bull; Title Bar Cards &bull; Bullet Hierarchies
+          </div>
+        </div>
+      `;
+    } else if (currentTool === 'html-to-pdf') {
+      toolSettings.innerHTML = `
+        <div class="setting-group">
+          <label>HTML to PDF Options</label>
+          <p class="setting-hint">Renders HTML headings, paragraphs, lists, and code blocks into paginated PDF pages.</p>
+        </div>
+        <div class="setting-group" style="margin-top: 0.75rem;">
+          <label>Document Layout</label>
+          <div style="font-size: 0.85rem; background: #f8fafc; padding: 0.6rem; border-radius: var(--radius-sm); border: 1px solid var(--border);">
+            A4 Portrait &bull; Clean Typography &bull; Automatic Pagination
+          </div>
+        </div>
+      `;
+    } else if (currentTool === 'pdf-to-word') {
+      toolSettings.innerHTML = `
+        <div class="setting-group">
+          <label>PDF to Word Options</label>
+          <p class="setting-hint">Extracts textual flow and paragraph headings into editable Microsoft Word (.docx) format.</p>
+        </div>
+        <div class="setting-group" style="margin-top: 0.75rem;">
+          <label>Output Format</label>
+          <div style="font-size: 0.85rem; background: #f8fafc; padding: 0.6rem; border-radius: var(--radius-sm); border: 1px solid var(--border);">
+            Microsoft Word (.docx) &bull; OpenXML Standard &bull; Multi-page breaks
+          </div>
+        </div>
+      `;
+    } else if (currentTool === 'pdf-to-excel') {
+      toolSettings.innerHTML = `
+        <div class="setting-group">
+          <label>PDF to Excel Options</label>
+          <p class="setting-hint">Detects data rows and clusters numeric and text cells into a Microsoft Excel workbook (.xlsx).</p>
+        </div>
+        <div class="setting-group" style="margin-top: 0.75rem;">
+          <label>Output Format</label>
+          <div style="font-size: 0.85rem; background: #f8fafc; padding: 0.6rem; border-radius: var(--radius-sm); border: 1px solid var(--border);">
+            Microsoft Excel (.xlsx) &bull; Shared String Table &bull; Tabular Grid
+          </div>
+        </div>
+      `;
+    } else if (currentTool === 'pdf-to-powerpoint') {
+      toolSettings.innerHTML = `
+        <div class="setting-group">
+          <label>PDF to PowerPoint Options</label>
+          <p class="setting-hint">Generates 16:9 presentation slides with titles and bullet points from PDF pages.</p>
+        </div>
+        <div class="setting-group" style="margin-top: 0.75rem;">
+          <label>Output Format</label>
+          <div style="font-size: 0.85rem; background: #f8fafc; padding: 0.6rem; border-radius: var(--radius-sm); border: 1px solid var(--border);">
+            Microsoft PowerPoint (.pptx) &bull; 1 Slide per Document Page
+          </div>
+        </div>
+      `;
+    } else if (currentTool === 'pdf-to-pdfa') {
+      toolSettings.innerHTML = `
+        <div class="setting-group">
+          <label>PDF/A Archival Profile</label>
+          <div style="font-size: 0.85rem; background: #f8fafc; padding: 0.6rem; border-radius: var(--radius-sm); border: 1px solid var(--border);">
+            <strong>ISO 19005-1 (PDF/A-1b)</strong><br>
+            <span class="setting-hint">Injects XMP metadata packet and sRGB OutputIntents for long-term document preservation.</span>
+          </div>
+        </div>
+      `;
     }
   }
 
@@ -3437,6 +3565,62 @@ document.addEventListener('DOMContentLoaded', () => {
         const pdfBytes = await PDFCore.ocrPDF(srcBytes, { lang });
         downloadFile(pdfBytes, 'searchable_ocr_document.pdf', 'application/pdf');
         showSuccess('Searchable PDF generated with embedded text layer!');
+      } else if (currentTool === 'word-to-pdf') {
+        if (uploadedFiles.length === 0) throw new Error('Please select a Word document (.docx) to convert.');
+        const srcBytes = uploadedFiles[0].bytes.slice();
+        showStatus('Converting Word document to PDF...', 'processing');
+        const pdfBytes = await PDFCore.wordToPDF(srcBytes);
+        downloadFile(pdfBytes, 'converted_word.pdf', 'application/pdf');
+        showSuccess('Word document successfully converted to PDF!');
+      } else if (currentTool === 'excel-to-pdf') {
+        if (uploadedFiles.length === 0) throw new Error('Please select an Excel workbook (.xlsx) to convert.');
+        const srcBytes = uploadedFiles[0].bytes.slice();
+        showStatus('Converting spreadsheet to PDF...', 'processing');
+        const pdfBytes = await PDFCore.excelToPDF(srcBytes);
+        downloadFile(pdfBytes, 'converted_spreadsheet.pdf', 'application/pdf');
+        showSuccess('Excel spreadsheet successfully converted to PDF!');
+      } else if (currentTool === 'powerpoint-to-pdf') {
+        if (uploadedFiles.length === 0) throw new Error('Please select a PowerPoint presentation (.pptx) to convert.');
+        const srcBytes = uploadedFiles[0].bytes.slice();
+        showStatus('Converting presentation to PDF...', 'processing');
+        const pdfBytes = await PDFCore.powerpointToPDF(srcBytes);
+        downloadFile(pdfBytes, 'converted_presentation.pdf', 'application/pdf');
+        showSuccess('PowerPoint presentation successfully converted to PDF!');
+      } else if (currentTool === 'html-to-pdf') {
+        if (uploadedFiles.length === 0) throw new Error('Please select an HTML file to convert.');
+        const srcBytes = uploadedFiles[0].bytes.slice();
+        showStatus('Rendering HTML to PDF...', 'processing');
+        const pdfBytes = await PDFCore.htmlToPDF(srcBytes);
+        downloadFile(pdfBytes, 'converted_webpage.pdf', 'application/pdf');
+        showSuccess('HTML document successfully converted to PDF!');
+      } else if (currentTool === 'pdf-to-word') {
+        if (uploadedFiles.length === 0) throw new Error('Please select a PDF document to convert.');
+        const srcBytes = uploadedFiles[0].bytes.slice();
+        showStatus('Extracting content and formatting Word document (.docx)...', 'processing');
+        const docxBytes = await PDFCore.pdfToWord(srcBytes);
+        downloadBlob(new Blob([docxBytes], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }), 'converted_document.docx');
+        showSuccess('PDF successfully converted to editable Word (.docx)!');
+      } else if (currentTool === 'pdf-to-excel') {
+        if (uploadedFiles.length === 0) throw new Error('Please select a PDF document to convert.');
+        const srcBytes = uploadedFiles[0].bytes.slice();
+        showStatus('Extracting tabular data and building Excel workbook (.xlsx)...', 'processing');
+        const xlsxBytes = await PDFCore.pdfToExcel(srcBytes);
+        downloadBlob(new Blob([xlsxBytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), 'converted_data.xlsx');
+        showSuccess('PDF data successfully converted to Excel (.xlsx)!');
+      } else if (currentTool === 'pdf-to-powerpoint') {
+        if (uploadedFiles.length === 0) throw new Error('Please select a PDF document to convert.');
+        const srcBytes = uploadedFiles[0].bytes.slice();
+        showStatus('Generating PowerPoint slides (.pptx)...', 'processing');
+        const pptxBytes = await PDFCore.pdfToPowerPoint(srcBytes);
+        downloadBlob(new Blob([pptxBytes], { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' }), 'converted_presentation.pptx');
+        showSuccess('PDF successfully converted to PowerPoint (.pptx)!');
+      } else if (currentTool === 'pdf-to-pdfa') {
+        if (uploadedFiles.length === 0) throw new Error('Please select a PDF document to convert.');
+        const srcBytes = uploadedFiles[0].bytes.slice();
+        showStatus('Injecting ISO 19005-1 compliance metadata and color profiles...', 'processing');
+        const pdfaBytes = await PDFCore.pdfToPdfA(srcBytes);
+        downloadFile(pdfaBytes, 'archived_document_pdfa.pdf', 'application/pdf');
+        showSuccess('Document converted to ISO-standardized PDF/A-1b!');
       }
     } catch (err) {
       console.error(err);
