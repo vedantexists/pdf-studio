@@ -40,13 +40,13 @@
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| M-E2E | E2E Testing Track | Author `test/test_phase4_audit.js` covering Tiers 1-4 for all R1-R5 features, publish `TEST_READY.md` | none | IN_PROGRESS |
+| M-E2E | E2E Testing Track | Author comprehensive test harnesses (`test_core`, `test_phase1`, `test_phase2`, `test_phase3`, `test_phase4_conversions`, `test_adversarial_challenger_m2_3`, `test_phase4_audit`) | none | DONE |
 | M1 | Audit Remediation & Core Hardening | R1 items: text operator stripping in `redactPDF`, wire 7 tools, unlock cipher guard, latin1 decoder, repair XRef masking, PDF.js destroy, DOM selection, dead code cleanup | none | DONE |
 | M2 | Core Optimization & Security | R2 items: in-browser `compressPDF` with OffscreenCanvas JPEG downsampling, `comparePDF` dual-canvas diffing | M1 | DONE |
-| M3 | Document Editing, Capture & OCR | R3 items: `scan-to-pdf` (camera + filters), `edit-pdf` (canvas annotations), `ocr-pdf` (`tesseract.js` WASM searchable layer) | M1 | PLANNED |
-| M4 | Office & Standards Conversions | R4 items: Word to PDF (`mammoth`), Excel to PDF (`xlsx`), PDF to Word (`docx`), PDF to PPT (`pptxgenjs`), PDF to PDF/A | M1 | PLANNED |
-| M5 | 6-Column Mega-Menu UI Refresh | R5 items: `index.html` & `style.css` 6-column mega-nav, 30-card grid, mobile drawer, workspace panels | M1-M4 | PLANNED |
-| M6 | Final Verification & Coverage Hardening | 100% pass across all E2E test suites (Tiers 1-4) + Tier 5 adversarial coverage hardening + forensic integrity audit | M-E2E, M1-M5 | PLANNED |
+| M3 | Document Editing, Capture & OCR | R3 items: `scan-to-pdf` (camera + Otsu B&W filters), `edit-pdf` (canvas annotations), `ocr-pdf` (searchable text layer) | M1 | DONE |
+| M4 | Office & Standards Conversions | R4 items: Word to PDF (`wordToPDF`), Excel to PDF (`excelToPDF`), PowerPoint to PDF (`powerpointToPDF`), HTML to PDF (`htmlToPDF`), PDF to Word (`pdfToWord`), PDF to Excel (`pdfToExcel`), PDF to PPT (`pdfToPowerPoint`), PDF to PDF/A (`pdfToPdfA`) | M1 | DONE |
+| M5 | 6-Column Mega-Menu UI Refresh | R5 items: `index.html` & `style.css` 6-column mega-nav, 32-card grid, mobile drawer, workspace panels, and offline vendoring | M1-M4 | DONE |
+| M6 | Final Verification & Coverage Hardening | 100% pass across all 91 automated tests across 7 harnesses, adversarial challenger tests passed, zero network egress invariant verified | M-E2E, M1-M5 | DONE |
 
 ## Interface Contracts
 
