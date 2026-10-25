@@ -15,11 +15,9 @@
   <script src="vendor/jszip.min.js"></script>
   <script src="vendor/pdf.min.js"></script>
   <script>
-    window.addEventListener('DOMContentLoaded', () => {
-      if (window.pdfjsLib && !window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
-        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
-      }
-    });
+    if (window.pdfjsLib && !window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
+    }
   </script>
 </head>
 <body>
@@ -365,8 +363,8 @@
               <button type="button" class="nav-tool-link" role="menuitem" data-tool="translate-pdf">
                 <span class="nav-tool-icon">🌍</span>
                 <span class="nav-tool-info">
-                  <span class="nav-tool-title">Translate PDF (Beta)</span>
-                  <span class="nav-tool-desc">Local glossary translation with zero cloud egress</span>
+                  <span class="nav-tool-title">Translate PDF (Glossary)</span>
+                  <span class="nav-tool-desc">Offline business glossary translation; zero network egress</span>
                 </span>
               </button>
               <button type="button" class="nav-tool-link" role="menuitem" data-tool="pdf-to-markdown">
@@ -476,7 +474,7 @@
         <div class="drawer-category-title">Intelligence</div>
         <div class="drawer-category-links">
           <button type="button" class="drawer-tool-link" data-tool="ai-summarizer">AI Summarizer</button>
-          <button type="button" class="drawer-tool-link" data-tool="translate-pdf">Translate PDF</button>
+          <button type="button" class="drawer-tool-link" data-tool="translate-pdf">Translate PDF (Glossary)</button>
           <button type="button" class="drawer-tool-link" data-tool="pdf-to-markdown">PDF to Markdown</button>
         </div>
       </div>
@@ -667,7 +665,7 @@
         <div class="tool-card" tabindex="0" role="button" data-tool="ocr-pdf" aria-label="OCR PDF tool">
           <div class="tool-icon">🔍</div>
           <h2>OCR PDF (Beta)</h2>
-          <p>Inject an invisible searchable, selectable text layer locally into PDFs without cloud uploads or language pack downloads.</p>
+          <p>Generate an invisible searchable, selectable text layer locally (requires client-side Tesseract WASM engine; zero cloud uploads).</p>
         </div>
 
         <!-- Edit PDF -->
@@ -743,8 +741,8 @@
         <!-- Translate PDF -->
         <div class="tool-card" tabindex="0" role="button" data-tool="translate-pdf" aria-label="Translate PDF tool">
           <div class="tool-icon">🌍</div>
-          <h2>Translate PDF (Beta)</h2>
-          <p>Translates document text client-side using built-in dictionaries (ES, FR, DE, IT) with zero cloud egress.</p>
+          <h2>Translate PDF (Glossary)</h2>
+          <p>Offline keyword & business glossary translation using client-side dictionaries (ES, FR, DE, IT). 100% private in-browser with zero-network transmission.</p>
         </div>
 
         <!-- PDF to Markdown -->

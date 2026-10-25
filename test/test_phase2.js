@@ -1,4 +1,6 @@
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 const { PDFDocument } = require('pdf-lib');
 const PDFCore = require('../pdf_core');
 
@@ -162,6 +164,128 @@ async function runPhase2Tests() {
     await assert.rejects(() => PDFCore.comparePDF(null, docA), /required/i);
     await assert.rejects(() => PDFCore.comparePDF(docA, null), /required/i);
     console.log('  ✓ comparePDF null guards passed cleanly');
+  }
+
+  // 6. Local PDF Worker Wiring & Offline Invariants
+  console.log('\n--- 6. Local PDF Worker Wiring (Offline Invariants) ---');
+  {
+    const appCode = fs.readFileSync(path.join(__dirname, '../app.js'), 'utf8');
+    const indexCode = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+
+    // Case A: Zero external CDN references for PDF worker
+    assert(!appCode.includes('cdnjs.cloudflare.com'), 'app.js must not reference cdnjs CDN');
+    assert(!appCode.includes('unpkg.com'), 'app.js must not reference unpkg CDN');
+    assert(!appCode.includes('cdn.jsdelivr.net'), 'app.js must not reference jsdelivr CDN');
+    assert(!indexCode.includes('cdnjs.cloudflare.com'), 'index.html must not reference cdnjs CDN');
+    assert(!indexCode.includes('unpkg.com'), 'index.html must not reference unpkg CDN');
+    assert(!indexCode.includes('cdn.jsdelivr.net'), 'index.html must not reference jsdelivr CDN');
+    console.log('  ✓ Zero external CDN references in app.js and index.html verified');
+
+    // Case B: Zero node_modules fallback in app.js
+    assert(!appCode.includes('node_modules/pdfjs-dist/build/pdf.worker.min.js'), 'app.js must not reference node_modules worker fallback');
+    console.log('  ✓ Zero node_modules path fallbacks in app.js verified');
+
+    // Case C: Worker wired directly to vendor/pdf.worker.min.js
+    assert(appCode.includes("window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js'"), 'app.js must wire workerSrc to vendor/pdf.worker.min.js');
+    assert(indexCode.includes("window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js'"), 'index.html must wire workerSrc to vendor/pdf.worker.min.js');
+    console.log('  ✓ Direct vendor/pdf.worker.min.js wiring verified in app.js and index.html');
+
+    // Case D: Local vendor worker asset exists and has genuine content
+    const workerPath = path.join(__dirname, '../vendor/pdf.worker.min.js');
+    assert(fs.existsSync(workerPath), 'vendor/pdf.worker.min.js must exist on disk');
+    const workerSize = fs.statSync(workerPath).size;
+    assert(workerSize > 500000, `vendor/pdf.worker.min.js must be a valid non-empty bundle (>500KB, actual: ${workerSize})`);
+    console.log(`  ✓ Local vendor worker bundle verified on disk (${workerSize} bytes)`);
+  }
+
+  // 7. Compare PDF Memory Optimization
+  console.log('\n--- 7. Compare PDF Memory Optimization ---');
+  {
+    const docA = await createSampleDoc(3, 'Baseline Revision');
+    const docB = await createSampleDoc(3, 'Updated Revision');
+
+    // Case A: Identical pages do NOT generate canvasDataUrl (saving memory)
+    const sameResult = await PDFCore.comparePDF(docA, docA);
+    assert.strictEqual(sameResult.totalDiffPixels, 0);
+    for (const page of sameResult.diffPages) {
+      assert.strictEqual(page.diffPixels, 0);
+      assert.strictEqual(page.canvasDataUrl, undefined, 'Identical pages must not allocate canvasDataUrl');
+    }
+    console.log('  ✓ Identical pages skip canvasDataUrl allocation to conserve memory');
+
+    // Case B: maxDiffImages bounding limits retained data URLs
+    const boundedResult = await PDFCore.comparePDF(docA, docB, { maxDiffImages: 1 });
+    const diffsWithDataUrl = boundedResult.diffPages.filter(p => p.canvasDataUrl);
+    assert(diffsWithDataUrl.length <= 1, `Retained diff images (${diffsWithDataUrl.length}) must not exceed maxDiffImages (1)`);
+    console.log('  ✓ maxDiffImages option enforces strict upper bound on retained image URLs');
+
+    // Case C: includeDataUrls=false produces diff metrics without any image buffers
+    const metricsOnly = await PDFCore.comparePDF(docA, docB, { includeDataUrls: false });
+    assert(metricsOnly.totalDiffPixels > 0, 'Metrics must still be computed');
+    const anyDataUrl = metricsOnly.diffPages.some(p => p.canvasDataUrl);
+    assert.strictEqual(anyDataUrl, false, 'No data URLs should be retained when includeDataUrls=false');
+    console.log('  ✓ includeDataUrls=false generates metrics with zero data URL retention');
+
+    // Case D: Static verification of try ... finally canvas dimension zeroing
+    const coreCode = fs.readFileSync(path.join(__dirname, '../pdf_core.js'), 'utf8');
+    assert(coreCode.includes('canvasA.width = 0; canvasA.height = 0;'), 'pdf_core.js must zero canvasA dimensions in finally');
+    assert(coreCode.includes('canvasB.width = 0; canvasB.height = 0;'), 'pdf_core.js must zero canvasB dimensions in finally');
+    assert(coreCode.includes('diffCanvas.width = 0; diffCanvas.height = 0;'), 'pdf_core.js must zero diffCanvas dimensions in finally');
+    console.log('  ✓ Canvas dimension zeroing in try ... finally verified in pdf_core.js');
+
+    // Case E: app.js compare execution uses memory-optimized maxDiffImages
+    const appCode = fs.readFileSync(path.join(__dirname, '../app.js'), 'utf8');
+    assert(appCode.includes('PDFCore.comparePDF(fileA, fileB, { maxDiffImages: 1 })'), 'app.js must call comparePDF with maxDiffImages: 1');
+    console.log('  ✓ app.js compare caller passes memory-optimized maxDiffImages: 1');
+  }
+
+  // 8. Honest Labeling & Offline Stub Handling
+  console.log('\n--- 8. Honest Labeling & Stub Handling (OCR & Translation) ---');
+  {
+    const sample = await createSampleDoc(1, 'OCR Stub Test');
+
+    // Case A: Browser environment without Tesseract WASM throws explicit error
+    global.window = { pdfjsLib: {} }; // simulate browser DOM environment without window.Tesseract
+    try {
+      await assert.rejects(
+        () => PDFCore.ocrPDF(sample),
+        /Tesseract WASM/i,
+        'Invoking ocrPDF in browser without Tesseract WASM must throw clear error'
+      );
+      console.log('  ✓ Client-side OCR without Tesseract WASM throws explicit actionable error');
+    } finally {
+      delete global.window;
+    }
+
+    // Case B: Mock text injection still supported for testing
+    const ocrMocked = await PDFCore.ocrPDF(sample, { mockText: 'Verified OCR Injection' });
+    assert(ocrMocked instanceof Uint8Array, 'ocrPDF with mockText must return Uint8Array');
+    const docMock = await PDFDocument.load(ocrMocked);
+    assert.strictEqual(docMock.getPageCount(), 1);
+    console.log('  ✓ ocrPDF mockText supported for deterministic headless testing');
+
+    // Case C: TOOLS registry accurate naming and disclosures
+    const appCode = fs.readFileSync(path.join(__dirname, '../app.js'), 'utf8');
+    assert(appCode.includes("title: 'Translate PDF (Glossary)'"), "TOOLS['translate-pdf'] must be titled 'Translate PDF (Glossary)'");
+    assert(appCode.includes("actionText: 'Translate Glossary Terms'"), "TOOLS['translate-pdf'] actionText must be 'Translate Glossary Terms'");
+    assert(appCode.includes('zero network transmission'), "TOOLS['translate-pdf'] description must disclose zero network transmission");
+    console.log('  ✓ TOOLS registry accurately reflects glossary translation and zero egress');
+
+    // Case D: Zero-Network Transmission Disclosure in UI settings and index.html
+    const indexCode = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+    assert(indexCode.includes('Translate PDF (Glossary)'), "index.html must display 'Translate PDF (Glossary)'");
+    assert(indexCode.includes('zero-network transmission') || indexCode.includes('zero network egress'), 'index.html must state zero-network transmission');
+    assert(indexCode.includes('requires client-side Tesseract WASM engine'), 'index.html must state OCR WASM requirement');
+    assert(appCode.includes('Zero-Network Transmission Disclosure:'), 'app.js must render Zero-Network Transmission Disclosure box');
+    console.log('  ✓ Honest UI labeling and zero-network transmission disclosures verified');
+
+    // Case E: Translated document output header disclosure
+    const sampleTextDoc = await PDFCore.textToPDF('Confidential Contract Agreement Report.');
+    const translatedMd = await PDFCore.translatePDF(sampleTextDoc, { targetLang: 'es', format: 'markdown' });
+    assert(typeof translatedMd === 'string', 'translatePDF with format=markdown must return string');
+    assert(translatedMd.includes('# Translated Document (Glossary - Spanish (Español))'), 'Translated doc header must state Glossary');
+    assert(translatedMd.includes('Zero network transmission — your document never left this browser'), 'Translated doc must contain zero network transmission notice');
+    console.log('  ✓ Translated document header contains honest Glossary and zero-network notice');
   }
 
   console.log('\n=============================================');

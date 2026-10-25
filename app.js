@@ -4,6 +4,12 @@
  */
 document.addEventListener('DOMContentLoaded', () => {
   const PDFCore = window.PDFCore || (typeof self !== 'undefined' ? self.PDFCore : null);
+
+  // Wire PDF.js worker directly to local bundled vendor asset
+  if (window.pdfjsLib && !window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
+  }
+
   // DOM Elements
   const dashboardView = document.getElementById('dashboardView');
   const workspaceView = document.getElementById('workspaceView');
@@ -428,14 +434,14 @@ document.addEventListener('DOMContentLoaded', () => {
       description: 'Extractive in-memory summary & bullet key takeaways using local sentence significance scoring (100% private, no external APIs).',
     },
     'translate-pdf': {
-      title: 'Translate PDF (Beta)',
+      title: 'Translate PDF (Glossary)',
       icon: '🌐',
-      actionText: 'Translate Document',
+      actionText: 'Translate Glossary Terms',
       accept: '.pdf,application/pdf',
       acceptImages: false,
       maxFiles: 1,
       multiple: false,
-      description: 'Local in-memory term and phrase translation using built-in dictionaries with zero data egress (Beta).',
+      description: 'Local keyword and glossary translation using built-in dictionaries (ES, FR, DE, IT) with zero network transmission. Never uploads documents to cloud translation APIs.',
     },
     'pdf-to-markdown': {
       title: 'PDF to Markdown',
@@ -1036,9 +1042,7 @@ document.addEventListener('DOMContentLoaded', () => {
       let pdf = null;
       try {
         if (!window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
-          window.pdfjsLib.GlobalWorkerOptions.workerSrc = window.location.protocol.startsWith('http')
-            ? 'node_modules/pdfjs-dist/build/pdf.worker.min.js'
-            : 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+          window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
         }
         const clonedBytes = file.bytes.slice();
         pdf = trackPdfDoc(await window.pdfjsLib.getDocument({ data: clonedBytes }).promise);
@@ -1260,9 +1264,7 @@ document.addEventListener('DOMContentLoaded', () => {
       let pdf = null;
       try {
         if (!window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
-          window.pdfjsLib.GlobalWorkerOptions.workerSrc = window.location.protocol.startsWith('http')
-            ? 'node_modules/pdfjs-dist/build/pdf.worker.min.js'
-            : 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+          window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
         }
         const clonedBytes = file.bytes.slice();
         pdf = trackPdfDoc(await window.pdfjsLib.getDocument({ data: clonedBytes }).promise);
@@ -1519,6 +1521,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (window.pdfjsLib) {
       let pdf = null;
       try {
+        if (!window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
+          window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
+        }
         const loadingTask = window.pdfjsLib.getDocument({ data: file.bytes.slice() });
         pdf = await loadingTask.promise;
         activePdfDocs.add(pdf);
@@ -2036,9 +2041,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (window.pdfjsLib) {
       try {
         if (!window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
-          window.pdfjsLib.GlobalWorkerOptions.workerSrc = window.location.protocol.startsWith('http')
-            ? 'node_modules/pdfjs-dist/build/pdf.worker.min.js'
-            : 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+          window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
         }
         // ALWAYS pass a cloned copy to prevent worker from detaching file.bytes
         const clonedBytes = file.bytes.slice();
@@ -2975,6 +2978,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
       }
     } else if (currentTool === 'ocr-pdf' || currentTool === 'ocr') {
+      const wasmLoaded = typeof window !== 'undefined' && !!window.Tesseract;
       toolSettings.innerHTML = `
         <div class="setting-group">
           <label for="ocrLangSelect">Recognition Language</label>
@@ -2986,7 +2990,13 @@ document.addEventListener('DOMContentLoaded', () => {
             <option value="chi_sim">Chinese Simplified (简体中文)</option>
             <option value="jpn">Japanese (日本語)</option>
           </select>
-          <p class="setting-hint">100% private in-browser OCR engine generates a searchable, selectable text layer directly in your PDF.</p>
+          ${!wasmLoaded ? `
+            <div style="background:#fffbeb; border:1px solid #fef3c7; color:#92400e; padding:0.6rem; border-radius:var(--radius-sm); font-size:0.8rem; margin-top:0.65rem; line-height:1.4;">
+              ⚠️ <strong>WASM Engine Unavailable:</strong> Tesseract WASM is not loaded. OCR requires the WebAssembly runtime to process image text offline.
+            </div>
+          ` : `
+            <p class="setting-hint">100% private in-browser OCR engine generates a searchable, selectable text layer directly in your PDF.</p>
+          `}
         </div>
       `;
     } else if (currentTool === 'scan-to-pdf' || currentTool === 'scan') {
@@ -3117,14 +3127,17 @@ document.addEventListener('DOMContentLoaded', () => {
     } else if (currentTool === 'translate-pdf' || currentTool === 'translate') {
       toolSettings.innerHTML = `
         <div class="setting-group">
-          <label for="translateLangSelect">Target Language</label>
+          <label for="translateLangSelect">Target Language (Glossary Dictionary)</label>
           <select id="translateLangSelect" class="form-select">
             <option value="es" selected>Spanish (Español)</option>
             <option value="fr">French (Français)</option>
             <option value="de">German (Deutsch)</option>
             <option value="it">Italian (Italiano)</option>
           </select>
-          <p class="setting-hint">100% private in-browser document translation without external server uploads.</p>
+          <div style="background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.65rem; margin-top: 0.65rem; font-size: 0.8rem; line-height: 1.5;">
+            <strong>🔒 Zero-Network Transmission Disclosure:</strong>
+            <p style="margin: 0.25rem 0 0; color: var(--text-muted);">This tool executes 100% offline inside your browser. No document content, text, or metadata is ever transmitted over any network or sent to cloud translation services. Translations are performed via local in-memory business glossary dictionaries.</p>
+          </div>
         </div>
       `;
     } else if (currentTool === 'pdf-to-markdown' || currentTool === 'pdf-to-md') {
@@ -3258,9 +3271,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (!window.pdfjsLib) throw new Error('PDF.js rendering engine is not loaded.');
         if (!window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
-          window.pdfjsLib.GlobalWorkerOptions.workerSrc = window.location.protocol.startsWith('http')
-            ? 'node_modules/pdfjs-dist/build/pdf.worker.min.js'
-            : 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+          window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
         }
         let pdf = null;
         try {
@@ -3541,7 +3552,7 @@ document.addEventListener('DOMContentLoaded', () => {
         showStatus('Comparing revisions...', 'processing');
         const fileA = uploadedFiles[0].bytes.slice();
         const fileB = uploadedFiles[1].bytes.slice();
-        const result = await PDFCore.comparePDF(fileA, fileB);
+        const result = await PDFCore.comparePDF(fileA, fileB, { maxDiffImages: 1 });
         const diffPages = result.diffPages || [];
         if (!diffPages || diffPages.length === 0) {
           throw new Error('Failed to parse either PDF document for comparison. Ensure both files are valid PDFs.');
@@ -3626,6 +3637,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (uploadedFiles.length === 0) {
           throw new Error('Please upload a PDF document to perform OCR.');
         }
+        if (typeof window !== 'undefined' && (!window.Tesseract || typeof window.Tesseract.recognize !== 'function')) {
+          throw new Error('Client-side OCR requires the Tesseract WASM engine, which is not bundled or loaded in offline mode. Please load Tesseract WASM or provide a pre-recognized text layer.');
+        }
         const srcBytes = uploadedFiles[0].bytes.slice();
         const lang = document.getElementById('ocrLangSelect')?.value || 'eng';
         showStatus(`Running client-side OCR recognition (${lang})...`, 'processing');
@@ -3699,10 +3713,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (uploadedFiles.length === 0) throw new Error('Please select a PDF document to translate.');
         const srcBytes = uploadedFiles[0].bytes.slice();
         const targetLang = document.getElementById('translateLangSelect')?.value || 'es';
-        showStatus(`Translating document to ${targetLang.toUpperCase()}...`, 'processing');
-        const translatedMd = await PDFCore.translatePDF(srcBytes, { targetLang });
+        showStatus(`Translating document glossary to ${targetLang.toUpperCase()}...`, 'processing');
+        const translatedMd = await PDFCore.translatePDF(srcBytes, { targetLang, format: 'markdown' });
         downloadBlob(new Blob([translatedMd], { type: 'text/markdown;charset=utf-8' }), `translated_${targetLang}.md`);
-        showSuccess('Document translated successfully!');
+        showSuccess('Document translated via local offline glossary with zero network transmission!');
       } else if (currentTool === 'pdf-to-markdown' || currentTool === 'pdf-to-md') {
         if (uploadedFiles.length === 0) throw new Error('Please select a PDF document to convert.');
         const srcBytes = uploadedFiles[0].bytes.slice();

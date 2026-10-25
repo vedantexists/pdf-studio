@@ -2433,6 +2433,9 @@
           // Exists in both documents
           let canvasDiffDone = false;
           if (hasCanvas && docA && docB) {
+            let canvasA = null;
+            let canvasB = null;
+            let diffCanvas = null;
             try {
               const pA = await docA.getPage(pageNumber);
               const pB = await docB.getPage(pageNumber);
@@ -2447,15 +2450,15 @@
                 return c;
               };
 
-              const canvasA = createC(Math.round(vpA.width), Math.round(vpA.height));
-              const canvasB = createC(Math.round(vpB.width), Math.round(vpB.height));
+              canvasA = createC(Math.round(vpA.width), Math.round(vpA.height));
+              canvasB = createC(Math.round(vpB.width), Math.round(vpB.height));
 
               await pA.render({ canvasContext: canvasA.getContext('2d'), viewport: vpA }).promise;
               await pB.render({ canvasContext: canvasB.getContext('2d'), viewport: vpB }).promise;
 
               const w = Math.max(canvasA.width, canvasB.width);
               const h = Math.max(canvasA.height, canvasB.height);
-              const diffCanvas = createC(w, h);
+              diffCanvas = createC(w, h);
               const diffCtx = diffCanvas.getContext('2d');
               const imgA = canvasA.getContext('2d').getImageData(0, 0, canvasA.width, canvasA.height);
               const imgB = canvasB.getContext('2d').getImageData(0, 0, canvasB.width, canvasB.height);
@@ -2509,13 +2512,29 @@
                 }
               }
               diffCtx.putImageData(diffImg, 0, 0);
-              if (typeof diffCanvas.toDataURL === 'function') {
+
+              diffPercent = totalPx > 0 ? Number(((diffPixels / totalPx) * 100).toFixed(2)) : 0;
+
+              // Memory Optimization: only generate and retain full-resolution PNG data URL
+              // if differences exist AND caller requested data URLs (or up to maxDiffImages limit)
+              const maxDiffImages = options.maxDiffImages !== undefined ? options.maxDiffImages : 1;
+              const shouldGenerateDataUrl = options.includeDataUrls !== false && diffPixels > 0 &&
+                (options.allDiffImages === true || diffPages.filter(p => p.canvasDataUrl).length < maxDiffImages);
+
+              if (shouldGenerateDataUrl && typeof diffCanvas.toDataURL === 'function') {
                 canvasDataUrl = diffCanvas.toDataURL('image/png');
               }
-              diffPercent = totalPx > 0 ? Number(((diffPixels / totalPx) * 100).toFixed(2)) : 0;
+              if (typeof options.onPageDiff === 'function') {
+                options.onPageDiff({ pageIndex: pageIdx, diffPixels, diffPercent, canvasDataUrl });
+              }
               canvasDiffDone = true;
             } catch (err) {
               // Fall back to text/structural comparison
+            } finally {
+              // Immediate canvas backing store release
+              if (canvasA) { canvasA.width = 0; canvasA.height = 0; }
+              if (canvasB) { canvasB.width = 0; canvasB.height = 0; }
+              if (diffCanvas) { diffCanvas.width = 0; diffCanvas.height = 0; }
             }
           }
 
@@ -2859,16 +2878,25 @@
     const lang = options.lang || 'eng';
 
     // 1. Client-Side Browser Execution via Tesseract.js (if available)
+    if (typeof window !== 'undefined') {
+      if (!window.Tesseract || typeof window.Tesseract.recognize !== 'function') {
+        if (!options.mockText && !options.mockPages) {
+          throw new Error('Client-side OCR requires the Tesseract WASM engine, which is not bundled or loaded in offline mode. Please load Tesseract WASM or provide a pre-recognized text layer.');
+        }
+      }
+    }
+
     if (typeof window !== 'undefined' && window.Tesseract && window.pdfjsLib) {
       for (let i = 0; i < totalPages; i++) {
         const page = doc.getPage(i);
         const { width, height } = page.getSize();
+        let canvas = null;
         try {
           const loadingTask = window.pdfjsLib.getDocument({ data: bytes.slice() });
           const pdfDoc = await loadingTask.promise;
           const pdfPage = await pdfDoc.getPage(i + 1);
           const viewport = pdfPage.getViewport({ scale: 1.5 });
-          const canvas = document.createElement('canvas');
+          canvas = document.createElement('canvas');
           canvas.width = viewport.width;
           canvas.height = viewport.height;
           const ctx = canvas.getContext('2d');
@@ -2898,6 +2926,8 @@
           await pdfDoc.destroy();
         } catch (e) {
           // Fall back to fallback logic below
+        } finally {
+          if (canvas) { canvas.width = 0; canvas.height = 0; }
         }
       }
       return await doc.save();
@@ -3968,11 +3998,11 @@
     });
 
     const langNames = { es: 'Spanish (Español)', fr: 'French (Français)', de: 'German (Deutsch)', it: 'Italian (Italiano)' };
-    const translatedText = `# Translated Document (${langNames[targetLang] || targetLang.toUpperCase()})\n\n` +
-      `> *Notice: 100% private in-browser translation. Zero server uploads.*\n\n` +
+    const translatedText = `# Translated Document (Glossary - ${langNames[targetLang] || targetLang.toUpperCase()})\n\n` +
+      `> *Notice: 100% offline client-side glossary translation using local term dictionaries. Zero network transmission — your document never left this browser.*\n\n` +
       translatedLines.join('\n');
 
-    if (options.format === 'text') {
+    if (options.format === 'text' || options.format === 'markdown') {
       return translatedText;
     }
 
