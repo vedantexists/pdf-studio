@@ -482,10 +482,10 @@
    * @param {Uint8Array|ArrayBuffer} pdfBytes
    * @param {string|Object} userPasswordOrOptions
    * @param {string|null} [ownerPassword=null]
-   * @param {Object} [permissions={}]
+   * @param {Object|number|null} [permissions=null]
    * @returns {Promise<Uint8Array>}
    */
-    async function protectPDF(pdfBytes, userPasswordOrOptions, ownerPassword = null, permissions = {}) {
+  async function protectPDF(pdfBytes, userPasswordOrOptions, ownerPassword = null, permissions = null) {
     if (!pdfBytes) throw new Error('PDF bytes are required to protect.');
 
     let userPassword = userPasswordOrOptions;
@@ -494,7 +494,7 @@
       opts = userPasswordOrOptions;
       userPassword = userPasswordOrOptions.userPassword;
       ownerPassword = userPasswordOrOptions.ownerPassword !== undefined ? userPasswordOrOptions.ownerPassword : ownerPassword;
-      permissions = userPasswordOrOptions.permissions || permissions;
+      permissions = userPasswordOrOptions.permissions !== undefined ? userPasswordOrOptions.permissions : permissions;
     }
 
     if (!userPassword || typeof userPassword !== 'string' || userPassword.trim() === '') {
@@ -503,18 +503,92 @@
 
     // Real standard AES-256 PDF encryption via WebCrypto / pdf-lib-encrypt
     if (PDFLibEncrypt && typeof PDFLibEncrypt.lock === 'function') {
-      let pPerm = -4; // default permissions: full access once unlocked
-      if (permissions && typeof permissions === 'object') {
-        let p = -64;
-        if (permissions.printing === false) p &= ~4;
-        if (permissions.copying) p |= 16;
-        if (permissions.modifying) p |= 8;
-        if (permissions.annotating) p |= 32;
-        pPerm = p;
+      // PDF Reference (ISO 32000-1, Table 22) User access permissions (P integer)
+      // Bit positions (1-based):
+      // Bits 1-2: Reserved, must be 0
+      // Bit 3 (4): Print document (low quality / general)
+      // Bit 4 (8): Modify contents
+      // Bit 5 (16): Copy or extract text and graphics
+      // Bit 6 (32): Add or modify text annotations, fill form fields
+      // Bits 7-8: Reserved, must be 1
+      // Bit 9 (256): Fill in existing interactive form fields
+      // Bit 10 (512): Extract for accessibility
+      // Bit 11 (1024): Document assembly
+      // Bit 12 (2048): Print high resolution
+      // Bits 13-32: Reserved, must be 1
+      // Base value with only reserved bits set: 0xFFFFF0C0 = -3904
+      // Default value with all permissions allowed: 0xFFFFFFFC = -4
+      const PERM_BASE = -3904;
+      const BIT_PRINT_LOW = 4;
+      const BIT_MODIFY = 8;
+      const BIT_COPY = 16;
+      const BIT_ANNOTATE = 32;
+      const BIT_FILL_FORMS = 256;
+      const BIT_EXTRACT_ACC = 512;
+      const BIT_ASSEMBLE = 1024;
+      const BIT_PRINT_HIGH = 2048;
+
+      let pPerm = -4; // default permissions: everything allowed
+
+      if (typeof permissions === 'number') {
+        pPerm = permissions;
+      } else if (permissions && typeof permissions === 'object' && Object.keys(permissions).length > 0) {
+        if (permissions.all === false) {
+          pPerm = PERM_BASE;
+        } else {
+          pPerm = -4; // Start with all allowed, then explicitly set or clear
+        }
+
+        if (permissions.printing === false) {
+          pPerm &= ~(BIT_PRINT_LOW | BIT_PRINT_HIGH);
+        } else if (permissions.printing === true) {
+          pPerm |= (BIT_PRINT_LOW | BIT_PRINT_HIGH);
+        }
+
+        if (permissions.copying === false) {
+          pPerm &= ~BIT_COPY;
+          if (permissions.accessibility === false || (permissions.printing === false && permissions.modifying === false && permissions.annotating === false)) {
+            pPerm &= ~BIT_EXTRACT_ACC;
+          }
+        } else if (permissions.copying === true) {
+          pPerm |= BIT_COPY | BIT_EXTRACT_ACC;
+        }
+
+        if (permissions.modifying === false) {
+          pPerm &= ~(BIT_MODIFY | BIT_ASSEMBLE);
+        } else if (permissions.modifying === true) {
+          pPerm |= (BIT_MODIFY | BIT_ASSEMBLE);
+        }
+
+        if (permissions.annotating === false) {
+          pPerm &= ~(BIT_ANNOTATE | BIT_FILL_FORMS);
+        } else if (permissions.annotating === true) {
+          pPerm |= (BIT_ANNOTATE | BIT_FILL_FORMS);
+        }
+
+        if (permissions.accessibility === false) {
+          pPerm &= ~BIT_EXTRACT_ACC;
+        } else if (permissions.accessibility === true) {
+          pPerm |= BIT_EXTRACT_ACC;
+        }
+
+        if (permissions.assembly === false) {
+          pPerm &= ~BIT_ASSEMBLE;
+        } else if (permissions.assembly === true) {
+          pPerm |= BIT_ASSEMBLE;
+        }
+
+        if (permissions.formFilling === false) {
+          pPerm &= ~BIT_FILL_FORMS;
+        } else if (permissions.formFilling === true) {
+          pPerm |= BIT_FILL_FORMS;
+        }
       }
+
       return await PDFLibEncrypt.lock(pdfBytes, userPassword, {
         permissions: pPerm,
         algo: opts.algo || 'aes256',
+        ownerPassword: ownerPassword || undefined,
       });
     }
 

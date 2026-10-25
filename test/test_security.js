@@ -145,7 +145,104 @@ async function runSecuritySuiteTests() {
   assert.strictEqual(finalPipeDoc.getPageCount(), 2);
   console.log('✓ runPipeline with sign, protect, and unlock executed cleanly');
 
-  console.log('\nAll 10 Document Security Suite tests passed cleanly!');
+  // 11. Protect PDF Permission bits verification via qpdf --show-encryption and qpdf --check
+  const { execSync } = require('child_process');
+  const fs = require('fs');
+  const path = require('path');
+  const os = require('os');
+
+  function getQpdfPath() {
+    try {
+      execSync('qpdf --version', { stdio: 'ignore' });
+      return 'qpdf';
+    } catch (e) {}
+    const localAppData = process.env.LOCALAPPDATA || '';
+    if (localAppData) {
+      const candidate = path.join(localAppData, 'qpdf', 'qpdf-12.4.2-msvc64', 'bin', 'qpdf.exe');
+      if (fs.existsSync(candidate)) return `"${candidate}"`;
+    }
+    return 'qpdf';
+  }
+
+  const qpdfCmd = getQpdfPath();
+  const pwd = 'TestPass2026!';
+  const tmpDir = os.tmpdir();
+
+  const cases = [
+    {
+      name: '(a) defaults',
+      opts: undefined,
+      expectedP: -4,
+      checks: [
+        /R\s*=\s*6/,
+        /P\s*=\s*-4/,
+        /print low resolution:\s*allowed/,
+        /print high resolution:\s*allowed/,
+        /extract for any purpose:\s*allowed/,
+        /extract for accessibility:\s*allowed/,
+        /modify anything:\s*allowed/,
+      ],
+    },
+    {
+      name: '(b) printing: false',
+      opts: { printing: false },
+      expectedP: -2056,
+      checks: [
+        /R\s*=\s*6/,
+        /P\s*=\s*-2056/,
+        /print low resolution:\s*not allowed/,
+        /print high resolution:\s*not allowed/,
+        /extract for any purpose:\s*allowed/,
+      ],
+    },
+    {
+      name: '(c) copying: false',
+      opts: { copying: false },
+      expectedP: -20,
+      checks: [
+        /R\s*=\s*6/,
+        /P\s*=\s*-20/,
+        /print low resolution:\s*allowed/,
+        /print high resolution:\s*allowed/,
+        /extract for any purpose:\s*not allowed/,
+      ],
+    },
+    {
+      name: '(d) all false',
+      opts: { printing: false, copying: false, modifying: false, annotating: false },
+      expectedP: -3904,
+      checks: [
+        /R\s*=\s*6/,
+        /P\s*=\s*-3904/,
+        /print low resolution:\s*not allowed/,
+        /print high resolution:\s*not allowed/,
+        /extract for any purpose:\s*not allowed/,
+        /extract for accessibility:\s*not allowed/,
+        /modify anything:\s*not allowed/,
+      ],
+    },
+  ];
+
+  for (const c of cases) {
+    const tmpFile = path.join(tmpDir, `protect_test_${Date.now()}_${Math.random().toString(36).slice(2)}.pdf`);
+    try {
+      const lockedBytes = await PDFCore.protectPDF(sample, pwd, null, c.opts);
+      fs.writeFileSync(tmpFile, Buffer.from(lockedBytes));
+
+      const encInfo = execSync(`${qpdfCmd} --show-encryption --password=${pwd} "${tmpFile}"`, { encoding: 'utf8' });
+      for (const regex of c.checks) {
+        assert(regex.test(encInfo), `Failed check ${regex} on ${c.name}\nActual output:\n${encInfo}`);
+      }
+
+      const checkOut = execSync(`${qpdfCmd} --password=${pwd} --check "${tmpFile}"`, { encoding: 'utf8' });
+      assert(!/error/i.test(checkOut) || /No syntax or stream encoding errors found/i.test(checkOut), `qpdf --check failed on ${c.name}`);
+      console.log(`✓ qpdf permissions verified for ${c.name} (P = ${c.expectedP}, R = 6, AES-256)`);
+    } finally {
+      try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch (e) {}
+    }
+  }
+
+  console.log('\nAll 11 Document Security Suite tests passed cleanly!');
 }
 
 runSecuritySuiteTests().catch((err) => {
