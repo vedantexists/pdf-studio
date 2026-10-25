@@ -129,6 +129,13 @@
                   <span class="nav-tool-desc">Fix corrupted structures and rebuild XRef</span>
                 </span>
               </button>
+              <button type="button" class="nav-tool-link" role="menuitem" data-tool="ocr-pdf">
+                <span class="nav-tool-icon">🔍</span>
+                <span class="nav-tool-info">
+                  <span class="nav-tool-title">OCR PDF</span>
+                  <span class="nav-tool-desc">Add searchable selectable text layer</span>
+                </span>
+              </button>
             </div>
           </li>
 
@@ -143,6 +150,34 @@
                 <span class="nav-tool-info">
                   <span class="nav-tool-title">JPG / PNG to PDF</span>
                   <span class="nav-tool-desc">Convert images into clean PDF document</span>
+                </span>
+              </button>
+              <button type="button" class="nav-tool-link" role="menuitem" data-tool="word-to-pdf">
+                <span class="nav-tool-icon">📘</span>
+                <span class="nav-tool-info">
+                  <span class="nav-tool-title">Word to PDF</span>
+                  <span class="nav-tool-desc">Convert DOCX files to formatted PDF</span>
+                </span>
+              </button>
+              <button type="button" class="nav-tool-link" role="menuitem" data-tool="powerpoint-to-pdf">
+                <span class="nav-tool-icon">📊</span>
+                <span class="nav-tool-info">
+                  <span class="nav-tool-title">PowerPoint to PDF</span>
+                  <span class="nav-tool-desc">Convert PPTX presentations to PDF</span>
+                </span>
+              </button>
+              <button type="button" class="nav-tool-link" role="menuitem" data-tool="excel-to-pdf">
+                <span class="nav-tool-icon">📗</span>
+                <span class="nav-tool-info">
+                  <span class="nav-tool-title">Excel to PDF</span>
+                  <span class="nav-tool-desc">Convert XLSX spreadsheets to PDF</span>
+                </span>
+              </button>
+              <button type="button" class="nav-tool-link" role="menuitem" data-tool="html-to-pdf">
+                <span class="nav-tool-icon">🌐</span>
+                <span class="nav-tool-info">
+                  <span class="nav-tool-title">HTML to PDF</span>
+                  <span class="nav-tool-desc">Render web pages and HTML to PDF</span>
                 </span>
               </button>
               <button type="button" class="nav-tool-link" role="menuitem" data-tool="text-to-pdf">
@@ -168,6 +203,34 @@
                   <span class="nav-tool-desc">Convert PDF pages into high-res images</span>
                 </span>
               </button>
+              <button type="button" class="nav-tool-link" role="menuitem" data-tool="pdf-to-word">
+                <span class="nav-tool-icon">📄</span>
+                <span class="nav-tool-info">
+                  <span class="nav-tool-title">PDF to Word</span>
+                  <span class="nav-tool-desc">Extract text & formatting to DOCX</span>
+                </span>
+              </button>
+              <button type="button" class="nav-tool-link" role="menuitem" data-tool="pdf-to-powerpoint">
+                <span class="nav-tool-icon">📑</span>
+                <span class="nav-tool-info">
+                  <span class="nav-tool-title">PDF to PowerPoint</span>
+                  <span class="nav-tool-desc">Convert PDF pages into PPTX slides</span>
+                </span>
+              </button>
+              <button type="button" class="nav-tool-link" role="menuitem" data-tool="pdf-to-excel">
+                <span class="nav-tool-icon">📈</span>
+                <span class="nav-tool-info">
+                  <span class="nav-tool-title">PDF to Excel</span>
+                  <span class="nav-tool-desc">Extract tabular data into XLSX</span>
+                </span>
+              </button>
+              <button type="button" class="nav-tool-link" role="menuitem" data-tool="pdf-to-pdfa">
+                <span class="nav-tool-icon">🏛️</span>
+                <span class="nav-tool-info">
+                  <span class="nav-tool-title">PDF to PDF/A</span>
+                  <span class="nav-tool-desc">Convert to ISO 19005-1 standard</span>
+                </span>
+              </button>
               <button type="button" class="nav-tool-link" role="menuitem" data-tool="pdf-to-text">
                 <span class="nav-tool-icon">📝</span>
                 <span class="nav-tool-info">
@@ -184,6 +247,13 @@
               <span>Edit</span> <span class="arrow">▾</span>
             </button>
             <div class="nav-dropdown" role="menu" aria-label="Edit PDF tools">
+              <button type="button" class="nav-tool-link" role="menuitem" data-tool="edit-pdf">
+                <span class="nav-tool-icon">✏️</span>
+                <span class="nav-tool-info">
+                  <span class="nav-tool-title">Edit PDF</span>
+                  <span class="nav-tool-desc">Draw, highlight, and annotate PDF pages</span>
+                </span>
+              </button>
               <button type="button" class="nav-tool-link" role="menuitem" data-tool="rotate">
                 <span class="nav-tool-icon">↻</span>
                 <span class="nav-tool-info">
@@ -323,12 +393,17 @@
         <div class="drawer-category-links">
           <button type="button" class="drawer-tool-link" data-tool="compress">Compress PDF</button>
           <button type="button" class="drawer-tool-link" data-tool="repair">Repair PDF</button>
+          <button type="button" class="drawer-tool-link" data-tool="ocr-pdf">OCR PDF</button>
         </div>
       </div>
       <div class="drawer-category">
         <div class="drawer-category-title">Convert To</div>
         <div class="drawer-category-links">
           <button type="button" class="drawer-tool-link" data-tool="img-to-pdf">JPG / PNG to PDF</button>
+          <button type="button" class="drawer-tool-link" data-tool="word-to-pdf">Word to PDF</button>
+          <button type="button" class="drawer-tool-link" data-tool="powerpoint-to-pdf">PowerPoint to PDF</button>
+          <button type="button" class="drawer-tool-link" data-tool="excel-to-pdf">Excel to PDF</button>
+          <button type="button" class="drawer-tool-link" data-tool="html-to-pdf">HTML to PDF</button>
           <button type="button" class="drawer-tool-link" data-tool="text-to-pdf">Text to PDF</button>
         </div>
       </div>
@@ -336,6 +411,10 @@
         <div class="drawer-category-title">Convert From</div>
         <div class="drawer-category-links">
           <button type="button" class="drawer-tool-link" data-tool="pdf-to-img">PDF to JPG / PNG</button>
+          <button type="button" class="drawer-tool-link" data-tool="pdf-to-word">PDF to Word</button>
+          <button type="button" class="drawer-tool-link" data-tool="pdf-to-powerpoint">PDF to PowerPoint</button>
+          <button type="button" class="drawer-tool-link" data-tool="pdf-to-excel">PDF to Excel</button>
+          <button type="button" class="drawer-tool-link" data-tool="pdf-to-pdfa">PDF to PDF/A</button>
           <button type="button" class="drawer-tool-link" data-tool="pdf-to-text">PDF to Text</button>
         </div>
       </div>
@@ -346,6 +425,7 @@
           <button type="button" class="drawer-tool-link" data-tool="page-numbers">Page Numbers</button>
           <button type="button" class="drawer-tool-link" data-tool="watermark">Watermark PDF</button>
           <button type="button" class="drawer-tool-link" data-tool="crop">Crop PDF</button>
+          <button type="button" class="drawer-tool-link" data-tool="edit-pdf">Edit PDF</button>
           <button type="button" class="drawer-tool-link" data-tool="forms">PDF Forms</button>
           <button type="button" class="drawer-tool-link" data-tool="redact">Redact PDF</button>
         </div>
@@ -540,6 +620,76 @@
           </div>
           <h2>Sign PDF</h2>
           <p>Create drawn, typed, or uploaded signatures and stamp them onto document pages.</p>
+        </div>
+
+        <!-- OCR PDF -->
+        <div class="tool-card" tabindex="0" role="button" data-tool="ocr-pdf" aria-label="OCR PDF tool">
+          <div class="tool-icon">🔍</div>
+          <h2>OCR PDF</h2>
+          <p>Recognize scanned text and add a searchable, selectable text layer with client-side OCR.</p>
+        </div>
+
+        <!-- Edit PDF -->
+        <div class="tool-card" tabindex="0" role="button" data-tool="edit-pdf" aria-label="Edit PDF tool">
+          <div class="tool-icon">✏️</div>
+          <h2>Edit PDF</h2>
+          <p>Add freehand drawing, highlighter, annotations, and shapes directly to PDF pages.</p>
+        </div>
+
+        <!-- Word to PDF -->
+        <div class="tool-card" tabindex="0" role="button" data-tool="word-to-pdf" aria-label="Word to PDF tool">
+          <div class="tool-icon">📘</div>
+          <h2>Word to PDF</h2>
+          <p>Convert Word documents (.docx) to PDF with accurate layout and pagination.</p>
+        </div>
+
+        <!-- PowerPoint to PDF -->
+        <div class="tool-card" tabindex="0" role="button" data-tool="powerpoint-to-pdf" aria-label="PowerPoint to PDF tool">
+          <div class="tool-icon">📊</div>
+          <h2>PowerPoint to PDF</h2>
+          <p>Convert PowerPoint presentations (.pptx) to clean presentation PDF slides.</p>
+        </div>
+
+        <!-- Excel to PDF -->
+        <div class="tool-card" tabindex="0" role="button" data-tool="excel-to-pdf" aria-label="Excel to PDF tool">
+          <div class="tool-icon">📗</div>
+          <h2>Excel to PDF</h2>
+          <p>Convert Excel spreadsheets (.xlsx) into neat paginated PDF tables.</p>
+        </div>
+
+        <!-- HTML to PDF -->
+        <div class="tool-card" tabindex="0" role="button" data-tool="html-to-pdf" aria-label="HTML to PDF tool">
+          <div class="tool-icon">🌐</div>
+          <h2>HTML to PDF</h2>
+          <p>Render HTML web documents and snippets into formatted, printable PDF files.</p>
+        </div>
+
+        <!-- PDF to Word -->
+        <div class="tool-card" tabindex="0" role="button" data-tool="pdf-to-word" aria-label="PDF to Word tool">
+          <div class="tool-icon">📄</div>
+          <h2>PDF to Word</h2>
+          <p>Extract and convert PDF text and tables into editable Microsoft Word (.docx) files.</p>
+        </div>
+
+        <!-- PDF to PowerPoint -->
+        <div class="tool-card" tabindex="0" role="button" data-tool="pdf-to-powerpoint" aria-label="PDF to PowerPoint tool">
+          <div class="tool-icon">📑</div>
+          <h2>PDF to PowerPoint</h2>
+          <p>Transform PDF pages into editable Microsoft PowerPoint (.pptx) presentation slides.</p>
+        </div>
+
+        <!-- PDF to Excel -->
+        <div class="tool-card" tabindex="0" role="button" data-tool="pdf-to-excel" aria-label="PDF to Excel tool">
+          <div class="tool-icon">📈</div>
+          <h2>PDF to Excel</h2>
+          <p>Extract data and table structures from PDF into Microsoft Excel (.xlsx) spreadsheets.</p>
+        </div>
+
+        <!-- PDF to PDF/A -->
+        <div class="tool-card" tabindex="0" role="button" data-tool="pdf-to-pdfa" aria-label="PDF to PDF/A tool">
+          <div class="tool-icon">🏛️</div>
+          <h2>PDF to PDF/A</h2>
+          <p>Convert standard PDFs to ISO 19005-1 (PDF/A-1b) for long-term document archiving.</p>
         </div>
       </section>
     </div>
