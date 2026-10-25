@@ -179,7 +179,7 @@ async function runPhase3Tests() {
     console.log('  ✓ Static alphabet indexing verified with zero String.fromCharCode in pdf_core.js');
   }
 
-  // 7. Mobile Touch Reordering DOM & CSS Contract Verification
+  // 7. Mobile Touch Reordering DOM & CSS Cascade Precedence Verification
   console.log('\n--- 7. Mobile Touch Reorder Controls & CSS Verification ---');
   {
     const fs = require('fs');
@@ -196,12 +196,35 @@ async function runPhase3Tests() {
     assert(appJs.includes('mobile-reorder-label'), 'app.js must render page indicator label');
     console.log('  ✓ app.js mobile touch controls DOM template and action binding verified');
 
-    // Verify style.css responsive styling
-    assert(styleCss.includes('.mobile-touch-reorder'), 'style.css must include .mobile-touch-reorder rules');
+    // Verify style.css responsive styling & cascade hierarchy
     assert(styleCss.includes('@media (max-width: 900px)'), 'style.css must include 900px responsive breakpoint');
+
+    // 1. Base desktop concealment rule must exist outside media query
+    const desktopNoneIdx = styleCss.indexOf('.mobile-touch-reorder {\n  display: none;');
+    assert(desktopNoneIdx !== -1, 'style.css must define base desktop rule .mobile-touch-reorder { display: none; }');
+
+    // 2. Responsive display: flex must be declared AFTER desktop display: none to prevent cascade inversion
+    const mobileFlexIdx = styleCss.indexOf('.mobile-touch-reorder {\n    display: flex;');
+    assert(mobileFlexIdx !== -1, 'style.css must declare display: flex for .mobile-touch-reorder inside media query');
+    assert(desktopNoneIdx < mobileFlexIdx, `Cascade Inversion Defect: base desktop rule (pos ${desktopNoneIdx}) must precede responsive override (pos ${mobileFlexIdx})`);
+
+    // 3. Elevated specificity hierarchy for container and buttons
+    assert(styleCss.includes('.page-thumb-card .mobile-touch-reorder'), 'style.css must elevate container selector specificity with .page-thumb-card');
+    assert(styleCss.includes('.page-thumb-card .mobile-touch-reorder .mobile-reorder-btn'), 'style.css must elevate button selector specificity with .page-thumb-card and .mobile-touch-reorder');
+
+    // 4. Button height (40px) must be declared AFTER global .icon-btn (34px) to prevent height truncation
+    const iconBtnIdx = styleCss.indexOf('.icon-btn {\n  background: transparent;');
+    const btnHeight40Idx = styleCss.indexOf('height: 40px;');
+    assert(iconBtnIdx !== -1, 'style.css must define .icon-btn');
+    assert(btnHeight40Idx !== -1, 'style.css must define height: 40px for mobile reorder buttons');
+    assert(iconBtnIdx < btnHeight40Idx, `Selector Clash: .icon-btn (pos ${iconBtnIdx}) must be declared before mobile 40px touch height (pos ${btnHeight40Idx})`);
+
+    // 5. Touch target ergonomics and mobile optimizations
+    assert(styleCss.includes('min-width: 44px'), 'style.css must specify min-width: 44px for WCAG touch compliance');
     assert(styleCss.includes('touch-action: manipulation'), 'style.css must set touch-action: manipulation for instant tap response');
-    assert(styleCss.includes('height: 40px') || styleCss.includes('min-width: 44px'), 'style.css must meet mobile touch target requirements');
-    console.log('  ✓ style.css 900px breakpoint, desktop hiding, and touch target styles verified');
+    assert(styleCss.includes('user-select: none'), 'style.css must prevent text selection during touch reordering');
+    assert(styleCss.includes('pointer-events: none'), 'style.css must disable pointer events on disabled touch buttons');
+    console.log('  ✓ style.css 900px breakpoint, cascade declaration order, elevated specificity, and touch target ergonomics verified');
   }
 
   // 8. Multi-Phase Documentation & Disclosures Verification
