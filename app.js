@@ -2,7 +2,26 @@
  * PDFTool - iLovePDF Clone Application Controller
  * Handles UI interactions, file intake, PDF.js rendering, and PDFCore executions.
  */
-document.addEventListener('DOMContentLoaded', () => {
+/**
+ * HTML Escaping utility to prevent XSS injection across all dynamic UI sites
+ * @param {string} str
+ * @returns {string}
+ */
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { escapeHtml };
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('DOMContentLoaded', () => {
   const PDFCore = window.PDFCore || (typeof self !== 'undefined' ? self.PDFCore : null);
 
   // Wire PDF.js worker directly to local bundled vendor asset
@@ -1896,7 +1915,8 @@ document.addEventListener('DOMContentLoaded', () => {
       card.className = 'file-card-item';
       
       const sizeKb = (item.size / 1024).toFixed(1);
-      const ext = item.name.split('.').pop().toUpperCase();
+      const ext = escapeHtml(item.name.split('.').pop().toUpperCase());
+      const safeName = escapeHtml(item.name);
       const pageInfo = item.pageCount ? ` &bull; ${item.pageCount} page${item.pageCount > 1 ? 's' : ''}` : '';
 
       const isCompare = currentTool === 'compare' || currentTool === 'compare-pdf';
@@ -1906,8 +1926,8 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="file-info">
           <span class="file-badge">${ext}</span>
           <div>
-            <div class="file-name" title="${item.name}">${roleBadge}${item.name}</div>
-            <div class="file-size">${sizeKb} KB${pageInfo}</div>
+            <div class="file-name" title="${safeName}">${roleBadge}${safeName}</div>
+            <div class="file-size">${escapeHtml(sizeKb)} KB${pageInfo}</div>
           </div>
         </div>
         <div class="file-actions">
@@ -2492,8 +2512,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (btnF) btnF.onclick = () => { document.getElementById('redactX').value = 50; document.getElementById('redactY').value = 50; document.getElementById('redactW').value = 400; document.getElementById('redactH').value = 30; };
       }, 50);
     } else if (currentTool === 'compare' || currentTool === 'compare-pdf') {
-      const docAName = uploadedFiles[0] ? uploadedFiles[0].name : 'Document A';
-      const docBName = uploadedFiles[1] ? uploadedFiles[1].name : 'Not yet selected (use + Add More Files)';
+      const docAName = uploadedFiles[0] ? escapeHtml(uploadedFiles[0].name) : 'Document A';
+      const docBName = uploadedFiles[1] ? escapeHtml(uploadedFiles[1].name) : 'Not yet selected (use + Add More Files)';
       toolSettings.innerHTML = `
         <div class="setting-group">
           <label>Document Comparison</label>
@@ -2725,11 +2745,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
       updateCropCoordinateDisplay();
     } else if (currentTool === 'forms' || currentTool === 'pdf-forms') {
-      function escapeHtml(str) {
-        if (typeof str !== 'string') return String(str ?? '');
-        return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-      }
-
       let fieldsHtml = '';
       if (!inspectedFormFields || inspectedFormFields.length === 0) {
         fieldsHtml = `
@@ -3740,9 +3755,9 @@ document.addEventListener('DOMContentLoaded', () => {
   function showStatus(message, type) {
     statusBanner.className = `status-banner ${type}`;
     if (type === 'processing') {
-      statusBanner.innerHTML = `<div class="spinner"></div><span>${message}</span>`;
+      statusBanner.innerHTML = `<div class="spinner"></div><span>${escapeHtml(message)}</span>`;
     } else if (type === 'error') {
-      statusBanner.innerHTML = `<strong>Error:</strong> <span>${message}</span>`;
+      statusBanner.innerHTML = `<strong>Error:</strong> <span>${escapeHtml(message)}</span>`;
     }
     statusBanner.style.display = 'flex';
   }
@@ -3753,7 +3768,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <div style="display: flex; align-items: center; gap: 0.6rem;">
         <span style="display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: #10b981; color: #fff; font-size: 0.75rem; font-weight: 800;">✓</span>
         <div>
-          <div style="font-weight: 700; font-size: 0.95rem;">${message}</div>
+          <div style="font-weight: 700; font-size: 0.95rem;">${escapeHtml(message)}</div>
           <div style="font-size: 0.78rem; color: #a7f3d0;">Your download should begin automatically.</div>
         </div>
       </div>
@@ -4263,3 +4278,4 @@ document.addEventListener('DOMContentLoaded', () => {
 
   window.openCameraScanner = openCameraScanner;
 });
+}
