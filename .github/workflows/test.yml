@@ -35,6 +35,12 @@ jobs:
       - name: Install Node dependencies
         run: npm install
 
+      - name: Ensure browser is available for OCR acceptance test
+        run: |
+          if ! command -v google-chrome &> /dev/null && ! command -v chromium &> /dev/null; then
+            npx playwright install chromium
+          fi
+
       - name: Print environment info
         run: |
           echo "=== CI Runner Environment ==="
@@ -42,6 +48,7 @@ jobs:
           npm --version
           python --version
           qpdf --version | head -n 1
+          which google-chrome || echo "No google-chrome"
 
       - name: Run full test suite
         run: npm test

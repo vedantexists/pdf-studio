@@ -134,13 +134,30 @@ async function runPhase3Tests() {
     assert(extracted.includes('Recognized In-Memory OCR Document Content'), 'Text layer must be extractable via pdfToText');
     console.log('  ✓ Searchable text layer verified extractable via pdfToText');
 
+    // OCR in Node without mock or engine must throw clear error
+    await assert.rejects(
+      () => PDFCore.ocrPDF(pdfBytes, { lang: 'eng' }),
+      /OCR engine not available/i,
+      'ocrPDF without engine or mock in Node must throw OCR engine not available'
+    );
+    console.log('  ✓ ocrPDF without engine throws "OCR engine not available"');
+
     // OCR on blank pages produces no invented text layer
-    const ocrAuto = await PDFCore.ocrPDF(pdfBytes, { lang: 'eng' });
-    const autoDoc = await PDFDocument.load(ocrAuto);
+    const ocrBlank = await PDFCore.ocrPDF(pdfBytes, { mockPages: ['', ''] });
+    const autoDoc = await PDFDocument.load(ocrBlank);
     assert.strictEqual(autoDoc.getPageCount(), 2);
-    const autoTextPlain = await PDFCore.pdfToText(ocrAuto, { format: 'plain' });
+    const autoTextPlain = await PDFCore.pdfToText(ocrBlank, { format: 'plain' });
     assert.strictEqual(autoTextPlain.trim(), '', 'Blank pages must yield no recognized text');
     console.log('  ✓ ocrPDF blank pages yield no invented text');
+
+    // Per-page OCR failure reporting (failedPages)
+    const ocrWithFail = await PDFCore.ocrPDF(pdfBytes, {
+      mockPages: ['Page 1 recognized', new Error('Scanner feed jammed')]
+    });
+    assert(Array.isArray(ocrWithFail.failedPages), 'Result must contain failedPages array');
+    assert.strictEqual(ocrWithFail.failedPages.length, 1, 'Exactly 1 page failure recorded');
+    assert.strictEqual(ocrWithFail.failedPages[0].page, 2, 'Failed page is page 2');
+    console.log('  ✓ ocrPDF page-level failure recorded in failedPages');
 
     // Boundary cases
     await assert.rejects(() => PDFCore.ocrPDF(null), /required/i);
@@ -148,7 +165,7 @@ async function runPhase3Tests() {
 
     // Detached buffer safety
     const cloned = pdfBytes.slice();
-    const detachedSafe = await PDFCore.ocrPDF(cloned.buffer);
+    const detachedSafe = await PDFCore.ocrPDF(cloned.buffer, { mockText: 'Detached buffer' });
     assert(detachedSafe instanceof Uint8Array);
     console.log('  ✓ ocrPDF detached buffer safety verified');
   }

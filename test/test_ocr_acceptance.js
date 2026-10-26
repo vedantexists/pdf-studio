@@ -51,6 +51,23 @@ function findBrowser() {
     'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
     'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
   ];
+
+  // Also check Playwright installed browsers
+  try {
+    const pwDir = process.platform === 'win32'
+      ? path.join(process.env.LOCALAPPDATA || '', 'ms-playwright')
+      : path.join(process.env.HOME || '', '.cache', 'ms-playwright');
+    if (fs.existsSync(pwDir)) {
+      const dirs = fs.readdirSync(pwDir).filter(d => d.startsWith('chromium-'));
+      for (const d of dirs) {
+        const bin = process.platform === 'win32'
+          ? path.join(pwDir, d, 'chrome-win', 'chrome.exe')
+          : path.join(pwDir, d, 'chrome-linux', 'chrome');
+        if (fs.existsSync(bin)) candidates.push(bin);
+      }
+    }
+  } catch {}
+
   for (const c of candidates) {
     if (!c) continue;
     if (fs.existsSync(c)) return c;
@@ -64,17 +81,11 @@ function findBrowser() {
 }
 
 async function runOcrAcceptance() {
-  console.log('=== Item 3 Acceptance Test: Offline OCR with Local Tesseract WASM ===');
+  console.log('=== Item 4 Acceptance Test: Offline OCR with Local Tesseract WASM ===');
 
   const browserBin = findBrowser();
   if (!browserBin) {
-    console.log('  [NOTICE] No supported browser found in environment; verifying vendored OCR WASM assets');
-    assert(fs.existsSync(path.join(ROOT, 'vendor/tesseract/tesseract.min.js')), 'tesseract.min.js must exist');
-    assert(fs.existsSync(path.join(ROOT, 'vendor/tesseract/worker.min.js')), 'worker.min.js must exist');
-    assert(fs.existsSync(path.join(ROOT, 'vendor/tesseract/tesseract-core-simd.wasm')), 'wasm must exist');
-    assert(fs.existsSync(path.join(ROOT, 'vendor/tesseract/eng.traineddata.gz')), 'traineddata must exist');
-    console.log('  [PASS] Offline Tesseract assets verified.');
-    return;
+    throw new Error('No supported browser or OCR engine found in environment to run OCR acceptance test. A real browser or OCR engine is required; never pass without running the engine.');
   }
 
   // Step 1: Ensure rasterized test PDF exists

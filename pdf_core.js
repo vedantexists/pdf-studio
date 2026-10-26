@@ -3074,14 +3074,22 @@
       return res;
     }
 
-    // 1. Client-Side Browser Execution via Tesseract.js (if available)
-    if (typeof window !== 'undefined') {
-      if (!window.Tesseract || typeof window.Tesseract.recognize !== 'function') {
-        if (!options.mockText && !options.mockPages) {
-          throw new Error('Client-side OCR requires the Tesseract WASM engine, which is not bundled or loaded in offline mode. Please load Tesseract WASM or provide a pre-recognized text layer.');
-        }
+    // 1. Check OCR engine and mock availability
+    const hasBrowserEngine = (typeof window !== 'undefined' && window.Tesseract && typeof window.Tesseract.recognize === 'function');
+    const hasNodeEngine = (typeof global !== 'undefined' && global.Tesseract && typeof global.Tesseract.recognize === 'function');
+    const hasCustomEngine = Boolean(options.engine || options.tesseract);
+    const hasEngine = hasBrowserEngine || hasNodeEngine || hasCustomEngine;
+    const hasMock = Boolean(options.mockText || options.text || (options.mockPages && (Array.isArray(options.mockPages) ? options.mockPages.length > 0 : Object.keys(options.mockPages).length > 0)));
+
+    if (!hasEngine && !hasMock) {
+      if (typeof window !== 'undefined') {
+        throw new Error('OCR engine not available: Client-side OCR requires the Tesseract WASM engine, which is not bundled or loaded in offline mode. Please load Tesseract WASM or provide a pre-recognized text layer.');
+      } else {
+        throw new Error('OCR engine not available');
       }
     }
+
+    const failedPages = [];
 
     if (typeof window !== 'undefined' && window.Tesseract && window.pdfjsLib && !options.mockText && !options.mockPages) {
       const workerOptions = {
@@ -3172,7 +3180,8 @@
               }
             }
           } catch (pageErr) {
-            throw new Error(`OCR processing failed on page ${i + 1}: ${pageErr.message || pageErr}`);
+            // Page-level OCR failures are reported in failedPages, never silently swallowed
+            failedPages.push({ pageIndex: i, page: i + 1, error: pageErr.message || String(pageErr) });
           } finally {
             if (canvas) { canvas.width = 0; canvas.height = 0; }
           }
@@ -3186,12 +3195,23 @@
         }
       }
 
-      return await doc.save();
+      const result = await doc.save();
+      result.failedPages = failedPages;
+      return result;
     }
 
     // 2. Deterministic mock text injection (for testing)
     if (options.mockText || options.text || options.mockPages) {
       for (let i = 0; i < totalPages; i++) {
+        if (options.failPages && (options.failPages.includes(i + 1) || options.failPages.includes(i))) {
+          failedPages.push({ pageIndex: i, page: i + 1, error: `Simulated OCR failure on page ${i + 1}` });
+          continue;
+        }
+        if (options.mockPages && options.mockPages[i] instanceof Error) {
+          failedPages.push({ pageIndex: i, page: i + 1, error: options.mockPages[i].message });
+          continue;
+        }
+
         const page = doc.getPage(i);
         const { width, height } = page.getSize();
         let textToInject = '';
@@ -3220,7 +3240,9 @@
       }
     }
 
-    return await doc.save();
+    const finalResult = await doc.save();
+    finalResult.failedPages = failedPages;
+    return finalResult;
   }
 
   // --- XML Escaping Utilities ---
