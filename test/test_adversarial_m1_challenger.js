@@ -20,6 +20,7 @@ const dgram = require('dgram');
 const zlib = require('zlib');
 const { PDFDocument, PDFName, PDFHexString, rgb, degrees } = require('pdf-lib');
 const PDFCore = require('../pdf_core');
+const latin1 = require('./helpers/latin1');
 
 const results = {
   total: 0,
@@ -85,7 +86,7 @@ function runWithNetworkTrap(fn) {
 
 // Scan binary PDF bytes and all inflated streams for secret substring (plain or hex)
 function scanForSecret(pdfBytes, secretStr) {
-  const latin = new TextDecoder('latin1').decode(pdfBytes);
+  const latin = latin1.decode(pdfBytes);
   const hexPart = Buffer.from(secretStr, 'utf8').toString('hex');
   if (latin.includes(secretStr) || latin.toLowerCase().includes(hexPart.toLowerCase())) return true;
 
@@ -94,9 +95,9 @@ function scanForSecret(pdfBytes, secretStr) {
   let match;
   while ((match = streamRegex.exec(latin)) !== null) {
     const rawStreamStr = match[1];
-    const rawBuffer = Buffer.from(rawStreamStr, 'latin1');
+    const rawBuffer = latin1.encode(rawStreamStr);
     try {
-      const inflated = zlib.inflateSync(rawBuffer).toString('latin1');
+      const inflated = latin1.decode(zlib.inflateSync(rawBuffer));
       if (inflated.includes(secretStr) || inflated.toLowerCase().includes(hexPart.toLowerCase())) return true;
     } catch {
       // Stream may not be flate compressed or may be uncompressed
@@ -494,7 +495,7 @@ async function runAdversarialSuite() {
     page.drawText('Genuine Uncorrupted Document Body', { x: 50, y: 350, size: 16 });
     const originalBytes = await doc.save({ useObjectStreams: false });
 
-    const latin = new TextDecoder('latin1').decode(originalBytes);
+    const latin = latin1.decode(originalBytes);
 
     // Inject a fake stream containing decoy objects and fake /Root
     const fakeInject = '900 0 obj\n<< /Length 140 >>\nstream\n' +
@@ -508,9 +509,9 @@ async function runAdversarialSuite() {
     const corruptedLatin = latin.slice(0, xrefIdx) + fakeInject;
 
     // Execute repair on document with truncated xref/trailer
-    const brokenBytes = Buffer.from(corruptedLatin, 'latin1');
+    const brokenBytes = latin1.encode(corruptedLatin);
     const repairedBytes = await PDFCore.repairPDF(brokenBytes);
-    const repairedLatin = new TextDecoder('latin1').decode(repairedBytes);
+    const repairedLatin = latin1.decode(repairedBytes);
 
     // Verify reconstructed trailer /Root does NOT point to fake object 777
     const trailerStr = repairedLatin.slice(repairedLatin.lastIndexOf('trailer'));
@@ -536,7 +537,7 @@ async function runAdversarialSuite() {
     p2.drawText('Page Two Content', { x: 50, y: 350, size: 14 });
     const origBytes = await doc.save({ useObjectStreams: false });
 
-    let latin = new TextDecoder('latin1').decode(origBytes);
+    let latin = latin1.decode(origBytes);
 
     // Inject fake stream with CRLF line endings
     const fakeStreamCRLF = '999 0 obj\r\n<< /Length 80 >>\r\nstream\r\n' +
@@ -545,10 +546,10 @@ async function runAdversarialSuite() {
       'endstream\r\nendobj\r\n';
 
     const xrefIdx = latin.lastIndexOf('xref');
-    const damagedBytes = Buffer.from(latin.slice(0, xrefIdx) + fakeStreamCRLF, 'latin1');
+    const damagedBytes = latin1.encode(latin.slice(0, xrefIdx) + fakeStreamCRLF);
 
     const repairedBytes = await PDFCore.repairPDF(damagedBytes);
-    const repairedLatin = new TextDecoder('latin1').decode(repairedBytes);
+    const repairedLatin = latin1.decode(repairedBytes);
 
     const trailerStr = repairedLatin.slice(repairedLatin.lastIndexOf('trailer'));
     const rootMatch = trailerStr.match(/\/Root\s+(\d+)\s+(\d+)\s+R/);

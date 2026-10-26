@@ -28,6 +28,7 @@ const zlib = require('zlib');
 const PDFLib = require('pdf-lib');
 const { PDFDocument, PDFName, PDFRawStream, PDFRef } = PDFLib;
 const PDFCore = require('../pdf_core');
+const latin1 = require('./helpers/latin1');
 
 let passCount = 0;
 let failCount = 0;
@@ -592,8 +593,8 @@ async function runAdversarialSuite() {
     const orig = await doc.save();
 
     // Damage EOF
-    const latin = new TextDecoder('latin1').decode(orig);
-    const broken = Buffer.from(latin.slice(0, latin.lastIndexOf('trailer')), 'latin1');
+    const latin = latin1.decode(orig);
+    const broken = latin1.encode(latin.slice(0, latin.lastIndexOf('trailer')));
 
     const r1 = await PDFCore.repairPDF(broken);
     const r2 = await PDFCore.repairPDF(r1);
@@ -647,9 +648,9 @@ async function runAdversarialSuite() {
     assert(validBytes.length > 2000000, `Generated PDF must exceed 2MB (actual: ${validBytes.length} bytes)`);
 
     // Now corrupt the true trailer by truncating at the last 'trailer'
-    const latin = new TextDecoder('latin1').decode(validBytes);
+    const latin = latin1.decode(validBytes);
     const realTrailerIdx = latin.lastIndexOf('trailer');
-    const corruptedBytes = Buffer.from(latin.slice(0, realTrailerIdx), 'latin1');
+    const corruptedBytes = latin1.encode(latin.slice(0, realTrailerIdx));
 
     const startMs = Date.now();
     const repairedBytes = await PDFCore.repairPDF(corruptedBytes);
@@ -658,7 +659,7 @@ async function runAdversarialSuite() {
     assert(repairDurationMs < 5000, `Repair on 2MB document must complete under 5s (took ${repairDurationMs}ms)`);
 
     // Verify reconstructed trailer does NOT reference fake Root 999 0 R
-    const repStr = new TextDecoder('latin1').decode(repairedBytes);
+    const repStr = latin1.decode(repairedBytes);
     const trailerIdx = repStr.lastIndexOf('trailer');
     assert(trailerIdx > 0, 'Rebuilt document must contain trailer');
     const trailerBlock = repStr.slice(trailerIdx);
@@ -682,11 +683,11 @@ async function runAdversarialSuite() {
     const pdf15 = await doc.save({ useObjectStreams: true });
 
     // Corrupt the startxref offset in PDF 1.5+
-    const latin = new TextDecoder('latin1').decode(pdf15);
+    const latin = latin1.decode(pdf15);
     const sxMatch = latin.match(/startxref\s+(\d+)/);
     assert(sxMatch, 'Must find startxref');
     const badSx = latin.replace(/startxref\s+\d+/, 'startxref 99999999');
-    const brokenBytes = Buffer.from(badSx, 'latin1');
+    const brokenBytes = latin1.encode(badSx);
 
     const repaired = await PDFCore.repairPDF(brokenBytes);
     const repDoc = await PDFDocument.load(repaired);
@@ -734,9 +735,9 @@ async function runAdversarialSuite() {
     const rev2Bytes = await doc2.save({ useObjectStreams: false });
 
     // Truncate revision 2 trailer
-    const latin = new TextDecoder('latin1').decode(rev2Bytes);
+    const latin = latin1.decode(rev2Bytes);
     const lastTrailer = latin.lastIndexOf('trailer');
-    const truncatedRev2 = Buffer.from(latin.slice(0, lastTrailer), 'latin1');
+    const truncatedRev2 = latin1.encode(latin.slice(0, lastTrailer));
 
     const repaired = await PDFCore.repairPDF(truncatedRev2);
     const repDoc = await PDFDocument.load(repaired);

@@ -10,6 +10,7 @@ const path = require('path');
 const zlib = require('zlib');
 const { PDFDocument, PDFName, PDFHexString, rgb, StandardFonts } = require('pdf-lib');
 const PDFCore = require('../pdf_core');
+const latin1 = require('./helpers/latin1');
 
 async function run() {
   console.log('=== Reviewer M1 Independent Adversarial Verification Suite ===\n');
@@ -209,8 +210,7 @@ async function run() {
     p.drawText('Legitimate Content', { x: 50, y: 250, size: 14 });
     const originalBytes = await doc.save();
 
-    const decoder = new TextDecoder('latin1');
-    const fullStr = decoder.decode(originalBytes);
+    const fullStr = latin1.decode(originalBytes);
     const streamPos = fullStr.indexOf('stream');
     assert(streamPos > 0);
 
@@ -219,10 +219,10 @@ async function run() {
     const damagedStr = fullStr.slice(0, streamPos + 7) + fakeObj + fullStr.slice(streamPos + 7);
     const trailerPos = damagedStr.lastIndexOf('trailer');
     const truncatedStr = damagedStr.slice(0, trailerPos);
-    const brokenBytes = Buffer.from(truncatedStr, 'latin1');
+    const brokenBytes = latin1.encode(truncatedStr);
 
     const repaired = await PDFCore.repairPDF(brokenBytes);
-    const repStr = decoder.decode(repaired);
+    const repStr = latin1.decode(repaired);
     const trailerStr = repStr.slice(repStr.lastIndexOf('trailer'));
     const rootMatch = trailerStr.match(/\/Root\s+(\d+)\s+(\d+)\s+R/);
     assert(rootMatch, 'Repaired doc must contain /Root');

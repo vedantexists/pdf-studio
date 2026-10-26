@@ -34,6 +34,7 @@ const assert = require('assert');
 const PDFLib = require('pdf-lib');
 const { PDFDocument, PDFName, PDFArray, PDFRef, PDFRawStream, PDFString, degrees } = PDFLib;
 const PDFCore = require('../pdf_core');
+const latin1 = require('./helpers/latin1');
 
 const results = {
   total: 0,
@@ -98,7 +99,7 @@ async function runAdversarialSuite() {
     assert(!textAfter.includes('DEEP_NESTED_SECRET_9876'), 'Nested Form XObject text must be stripped under redaction');
 
     // Raw stream check
-    const rawLatin = new TextDecoder('latin1').decode(redactedBytes);
+    const rawLatin = latin1.decode(redactedBytes);
     assert(!rawLatin.includes('DEEP_NESTED_SECRET_9876'), 'Nested secret must not exist in raw bytes');
   });
 
@@ -181,7 +182,7 @@ async function runAdversarialSuite() {
     const textAfter = await PDFCore.pdfToText(redactedBytes);
     assert(!textAfter.includes('ROTATED_90_SECRET_VAL'), 'Rotated 90 deg text must be stripped under redaction');
 
-    const rawLatin = new TextDecoder('latin1').decode(redactedBytes);
+    const rawLatin = latin1.decode(redactedBytes);
     assert(!rawLatin.includes('ROTATED_90_SECRET_VAL'), 'Rotated text must not exist in raw bytes');
   });
 
@@ -425,7 +426,7 @@ async function runAdversarialSuite() {
     assert(uriVal.includes('example.com/safe-public'), 'Safe link URI must remain intact');
 
     // Verify secret token string does not appear anywhere in serialized PDF
-    const rawLatin = new TextDecoder('latin1').decode(redactedBytes);
+    const rawLatin = latin1.decode(redactedBytes);
     assert(!rawLatin.includes('SUPER_SECRET_TOKEN_9999'), 'Secret token must not exist in raw PDF output');
     assert(!rawLatin.includes('Click here for Admin access'), 'Secret tooltip must not exist in raw PDF output');
     assert(!rawLatin.includes('Internal Admin Dashboard'), 'Secret Contents must not exist in raw PDF output');
@@ -461,7 +462,7 @@ async function runAdversarialSuite() {
     const isCleared = !p1Annots || (p1Annots instanceof PDFArray && p1Annots.size() === 0);
     assert(isCleared, 'Annots entry must be removed or empty when all annotations are redacted');
 
-    const rawLatin = new TextDecoder('latin1').decode(redactedBytes);
+    const rawLatin = latin1.decode(redactedBytes);
     assert(!rawLatin.includes('Jump to Secret Page 2'), 'GoTo link contents must not exist in raw bytes');
   });
 
@@ -492,7 +493,7 @@ async function runAdversarialSuite() {
     const isCleared = !pAnnots || (pAnnots instanceof PDFArray && pAnnots.size() === 0);
     assert(isCleared, 'Partially overlapping annotation must be stripped');
 
-    const rawLatin = new TextDecoder('latin1').decode(redactedBytes);
+    const rawLatin = latin1.decode(redactedBytes);
     assert(!rawLatin.includes('https://partial.secret/leak'), 'Partially overlapping URL must be stripped');
   });
 

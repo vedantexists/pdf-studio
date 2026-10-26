@@ -15,6 +15,7 @@ const zlib = require('zlib');
 const PDFLib = require('pdf-lib');
 const { PDFDocument, PDFName, PDFRawStream, PDFArray, PDFRef } = PDFLib;
 const PDFCore = require('../pdf_core');
+const latin1 = require('./helpers/latin1');
 
 // ============================================================================
 // Network Egress Trap (Zero Server Uploads Invariant)
@@ -759,7 +760,7 @@ async function runSuite() {
     page.drawText('Genuine Uncorrupted Page', { x: 50, y: 550, size: 20 });
     const originalBytes = await doc.save();
 
-    const latin = new TextDecoder('latin1').decode(originalBytes);
+    const latin = latin1.decode(originalBytes);
     const streamIdx = latin.indexOf('stream');
     assert(streamIdx > 0, 'Document must contain a stream');
 
@@ -769,10 +770,10 @@ async function runSuite() {
 
     // Truncate trailer to trigger repairPDF reconstruction
     const trailerIdx = corruptedLatin.lastIndexOf('trailer');
-    const brokenBytes = Buffer.from(corruptedLatin.slice(0, trailerIdx), 'latin1');
+    const brokenBytes = latin1.encode(corruptedLatin.slice(0, trailerIdx));
 
     const repairedBytes = await PDFCore.repairPDF(brokenBytes);
-    const repairedLatin = new TextDecoder('latin1').decode(repairedBytes);
+    const repairedLatin = latin1.decode(repairedBytes);
 
     // The repaired trailer /Root must NOT reference the fake object 999 0 R
     const trailerStr = repairedLatin.slice(repairedLatin.lastIndexOf('trailer'));

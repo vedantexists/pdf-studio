@@ -4281,5 +4281,6 @@
     summarizePDF,
     translatePDF,
     pdfToMarkdown,
+    latin1Decoder,
   };
 });

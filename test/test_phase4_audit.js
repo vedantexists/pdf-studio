@@ -22,6 +22,7 @@ const path = require('path');
 const zlib = require('zlib');
 const { PDFDocument, PDFName, PDFHexString } = require('pdf-lib');
 const PDFCore = require('../pdf_core');
+const latin1 = require('./helpers/latin1');
 
 // ============================================================================
 // Test Suite Statistics & Runner
@@ -202,7 +203,7 @@ async function runAuditSuite() {
         } catch {
           // uncompressed
         }
-        decompressedStreamText += new TextDecoder('latin1').decode(streamBytes);
+        decompressedStreamText += latin1.decode(streamBytes);
       }
     }
 
@@ -328,7 +329,7 @@ async function runAuditSuite() {
     const allBytes = new Uint8Array(256);
     for (let i = 0; i < 256; i++) allBytes[i] = i;
 
-    const decoded = new TextDecoder('latin1').decode(allBytes);
+    const decoded = (PDFCore.latin1Decoder || latin1).decode(allBytes);
     assert.strictEqual(decoded.length, 256, 'Latin1 decoded string length must match byte count');
     for (let i = 0; i < 256; i++) {
       assert.strictEqual(decoded.charCodeAt(i), i, `Byte ${i} must map 1:1 to charCode ${i}`);
@@ -338,10 +339,10 @@ async function runAuditSuite() {
     const largeBuffer = new Uint8Array(1024 * 1024);
     for (let i = 0; i < largeBuffer.length; i++) largeBuffer[i] = i & 0xff;
     const start = Date.now();
-    const largeDecoded = new TextDecoder('latin1').decode(largeBuffer);
+    const largeDecoded = (PDFCore.latin1Decoder || latin1).decode(largeBuffer);
     const duration = Date.now() - start;
     assert.strictEqual(largeDecoded.length, largeBuffer.length);
-    assert(duration < 200, `TextDecoder('latin1') should decode 1MB in <200ms, took ${duration}ms`);
+    assert(duration < 200, `latin1Decoder should decode 1MB in <200ms, took ${duration}ms`);
   });
 
   await runTest('AUDIT', '3.2', 'pdf_core.js does not contain quadratic String.fromCharCode concatenation loops', async () => {
@@ -357,7 +358,7 @@ async function runAuditSuite() {
     page.drawText('Genuine Page Content', { x: 50, y: 550, size: 20 });
     const originalBytes = await doc.save();
 
-    let latin = new TextDecoder('latin1').decode(originalBytes);
+    let latin = latin1.decode(originalBytes);
     const streamIdx = latin.indexOf('stream');
     assert(streamIdx > 0, 'Document must contain a stream');
 
@@ -367,10 +368,10 @@ async function runAuditSuite() {
 
     // Truncate trailer to trigger repairPDF reconstruction
     const trailerIdx = corruptedLatin.lastIndexOf('trailer');
-    const brokenBytes = Buffer.from(corruptedLatin.slice(0, trailerIdx), 'latin1');
+    const brokenBytes = latin1.encode(corruptedLatin.slice(0, trailerIdx));
 
     const repairedBytes = await PDFCore.repairPDF(brokenBytes);
-    const repairedLatin = new TextDecoder('latin1').decode(repairedBytes);
+    const repairedLatin = latin1.decode(repairedBytes);
 
     // The repaired trailer /Root must NOT reference the fake object 999 0 R
     const trailerStr = repairedLatin.slice(repairedLatin.lastIndexOf('trailer'));
