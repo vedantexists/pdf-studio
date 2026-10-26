@@ -9,14 +9,17 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: ['20', '22']
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
+      - name: Set up Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: ${{ matrix.node-version }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -31,6 +34,19 @@ jobs:
 
       - name: Install Node dependencies
         run: npm install
+
+      - name: Print environment info
+        run: |
+          echo "=== CI Runner Environment ==="
+          node --version
+          npm --version
+          python --version
+          qpdf --version | head -n 1
+
+      - name: Deliberately failing test check (proves workflow can go red)
+        run: |
+          echo "Deliberately failing verification step to prove CI goes red"
+          exit 1
 
       - name: Run full test suite
         run: npm test
