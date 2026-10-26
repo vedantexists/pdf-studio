@@ -3456,9 +3456,9 @@ if (typeof document !== 'undefined') {
         }
         const permissions = {
           printing: document.getElementById('protectPermPrinting')?.checked ?? true,
-          copying: document.getElementById('protectPermCopying')?.checked ?? false,
-          modifying: document.getElementById('protectPermModifying')?.checked ?? false,
-          annotating: document.getElementById('protectPermAnnotating')?.checked ?? false,
+          copying: document.getElementById('protectPermCopying')?.checked ?? true,
+          modifying: document.getElementById('protectPermModifying')?.checked ?? true,
+          annotating: document.getElementById('protectPermAnnotating')?.checked ?? true,
         };
         const protectedBytes = await PDFCore.protectPDF(srcBytes, pass, null, permissions);
         downloadFile(protectedBytes, 'protected.pdf', 'application/pdf');
@@ -3816,6 +3816,7 @@ if (typeof document !== 'undefined') {
     if (target) target.style.display = 'flex';
   }
   window.openModal = openModal;
+  window.downloadFile = downloadFile;
 
   function closeModal() {
     const modalContainer = document.getElementById('modalContainer');
@@ -4041,10 +4042,16 @@ if (typeof document !== 'undefined') {
         alert('Passwords do not match.');
         return;
       }
+      const permissions = {
+        printing: document.getElementById('modalProtectPermPrinting')?.checked ?? true,
+        copying: document.getElementById('modalProtectPermCopying')?.checked ?? true,
+        modifying: document.getElementById('modalProtectPermModifying')?.checked ?? true,
+        annotating: document.getElementById('modalProtectPermAnnotating')?.checked ?? true,
+      };
       closeModal();
       showStatus('Protecting PDF...', 'processing');
       try {
-        const res = await PDFCore.protectPDF(uploadedFiles[0].bytes.slice(), pass);
+        const res = await PDFCore.protectPDF(uploadedFiles[0].bytes.slice(), pass, null, permissions);
         downloadFile(res, 'protected.pdf', 'application/pdf');
         showSuccess('PDF protected successfully!');
       } catch (err) {

@@ -921,6 +921,25 @@
           <label for="modalProtectConfirmInput">Confirm Password *</label>
           <input type="password" id="modalProtectConfirmInput" placeholder="Confirm password">
         </div>
+        <div class="setting-group" style="margin-top: 0.75rem;">
+          <label>Permissions Constraints</label>
+          <label class="radio-option">
+            <input type="checkbox" id="modalProtectPermPrinting" checked>
+            <span>Allow Printing (High Quality)</span>
+          </label>
+          <label class="radio-option">
+            <input type="checkbox" id="modalProtectPermCopying" checked>
+            <span>Allow Copying Content & Graphics</span>
+          </label>
+          <label class="radio-option">
+            <input type="checkbox" id="modalProtectPermModifying" checked>
+            <span>Allow Modifying Contents</span>
+          </label>
+          <label class="radio-option">
+            <input type="checkbox" id="modalProtectPermAnnotating" checked>
+            <span>Allow Annotations & Form Filling</span>
+          </label>
+        </div>
         <div class="modal-footer">
           <button type="button" class="secondary-btn" data-close-modal>Cancel</button>
           <button type="button" class="primary-btn" id="modalProtectSubmitBtn">Protect Document</button>
