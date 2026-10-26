@@ -148,3 +148,21 @@ Now working on Item 6 (REPAIR EDGE CASE):
 Recomputing content stream lengths from endstream markers when extra bytes are injected into genuine page content streams, rebuilding XRef table offsets, and verifying that qpdf --check passes and page text recovers cleanly via pdfToText.
 
 Please review the proposed repair logic and verify edge cases across corrupt PDFs and xref table rebuilds.
+
+
+## 2026-10-26T10:38:57Z
+
+Orchestrator and Sentinel Team:
+Update on Item 6 (REPAIR EDGE CASE):
+We have completed the implementation in `pdf_core.js`:
+1. Recomputed `/Length` in stream dictionaries from `stream` to `endstream` markers whenever desynchronization occurs.
+2. Triggered `needsRepair = true` to force full XRef table reconstruction with exact recalculated byte offsets.
+3. Added `test/test_repair_acceptance.js` (Test 4) injecting 70 bytes into genuine page content streams, verifying:
+   - Broken PDF is detected as damaged by `qpdf --check`.
+   - `repairPDF` repairs the file with `qpdf --check` reporting zero syntax/stream errors.
+   - `pdfToText` completely recovers the genuine page text.
+4. Added bidirectional Latin-1 encoder (`encode: str => Uint8Array`) in `pdf_core.js` and preserved `new TextDecoder('latin1')` compatibility.
+5. All 28 test suites run dynamically via `test/run_all.js` with 471 passed, 0 failed, 1071 assertions.
+6. Pushed commit `891ac0e` to origin main.
+
+Please synthesize your explorers' findings into a final verification report on Item 6 so we can report to the user.
