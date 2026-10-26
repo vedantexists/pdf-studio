@@ -2847,15 +2847,15 @@ if (typeof document !== 'undefined') {
             <span>Allow Printing (High Quality)</span>
           </label>
           <label class="radio-option">
-            <input type="checkbox" id="protectPermCopying">
+            <input type="checkbox" id="protectPermCopying" checked>
             <span>Allow Copying Content & Graphics</span>
           </label>
           <label class="radio-option">
-            <input type="checkbox" id="protectPermModifying">
+            <input type="checkbox" id="protectPermModifying" checked>
             <span>Allow Modifying Contents</span>
           </label>
           <label class="radio-option">
-            <input type="checkbox" id="protectPermAnnotating">
+            <input type="checkbox" id="protectPermAnnotating" checked>
             <span>Allow Annotations & Form Filling</span>
           </label>
         </div>
@@ -3030,60 +3030,64 @@ if (typeof document !== 'undefined') {
     } else if (currentTool === 'word-to-pdf') {
       toolSettings.innerHTML = `
         <div class="setting-group">
-          <label>Word to PDF Options</label>
-          <p class="setting-hint">Converts .docx paragraphs, headings, bullet lists, and tables into cleanly formatted PDF pages.</p>
+          <label>Word to PDF (Beta)</label>
+          <p class="setting-hint">Converts headings, paragraphs, and simple tables from Word (.docx). Does not support images, CSS, or complex layout.</p>
         </div>
         <div class="setting-group" style="margin-top: 0.75rem;">
-          <label>Page Format</label>
+          <label>Supported Features</label>
           <div style="font-size: 0.85rem; background: #f8fafc; padding: 0.6rem; border-radius: var(--radius-sm); border: 1px solid var(--border);">
-            Standard A4 Portrait &bull; 50pt Margins &bull; Helvetica Typography
+            Text &bull; Headings &bull; Simple Paragraphs &bull; Standard Tables<br>
+            <span style="color: var(--text-muted); font-size: 0.8rem;">Unsupported: Images, headers/footers, floating frames, custom styles.</span>
           </div>
         </div>
       `;
     } else if (currentTool === 'excel-to-pdf') {
       toolSettings.innerHTML = `
         <div class="setting-group">
-          <label>Excel to PDF Options</label>
-          <p class="setting-hint">Extracts worksheets and structures into formatted tabular PDF pages with alternating fills.</p>
+          <label>Excel to PDF (Beta)</label>
+          <p class="setting-hint">Converts tabular cell text from Excel (.xlsx) into a landscape grid. Does not support formulas, charts, or cell styling.</p>
         </div>
         <div class="setting-group" style="margin-top: 0.75rem;">
-          <label>Sheet Layout</label>
+          <label>Supported Features</label>
           <div style="font-size: 0.85rem; background: #f8fafc; padding: 0.6rem; border-radius: var(--radius-sm); border: 1px solid var(--border);">
-            Landscape A4 &bull; Auto-Fitted Columns &bull; Header Shading
+            Worksheet Cell Values &bull; Landscape Layout &bull; Auto-width Columns<br>
+            <span style="color: var(--text-muted); font-size: 0.8rem;">Unsupported: Formulas, chart rendering, cell fills, fonts, multi-sheet tabs.</span>
           </div>
         </div>
       `;
     } else if (currentTool === 'powerpoint-to-pdf') {
       toolSettings.innerHTML = `
         <div class="setting-group">
-          <label>PowerPoint to PDF Options</label>
-          <p class="setting-hint">Transforms presentation slides into full-fidelity landscape presentation PDF pages.</p>
+          <label>PowerPoint to PDF (Beta)</label>
+          <p class="setting-hint">Converts slide titles, bullet points, and text into 16:9 slides. Does not support images, shapes, or complex layout.</p>
         </div>
         <div class="setting-group" style="margin-top: 0.75rem;">
-          <label>Slide Dimensions</label>
+          <label>Supported Features</label>
           <div style="font-size: 0.85rem; background: #f8fafc; padding: 0.6rem; border-radius: var(--radius-sm); border: 1px solid var(--border);">
-            16:9 Widescreen &bull; Title Bar Cards &bull; Bullet Hierarchies
+            Slide Titles &bull; Bullet Points &bull; 16:9 Presentation Pages<br>
+            <span style="color: var(--text-muted); font-size: 0.8rem;">Unsupported: Vector shapes, embedded pictures, animations, master templates.</span>
           </div>
         </div>
       `;
     } else if (currentTool === 'html-to-pdf') {
       toolSettings.innerHTML = `
         <div class="setting-group">
-          <label>HTML to PDF Options</label>
-          <p class="setting-hint">Renders HTML headings, paragraphs, lists, and code blocks into paginated PDF pages.</p>
+          <label>HTML to PDF (Beta)</label>
+          <p class="setting-hint">Converts text, headings, and simple tables from HTML. Does not support CSS layout, external fonts, or scripts.</p>
         </div>
         <div class="setting-group" style="margin-top: 0.75rem;">
-          <label>Document Layout</label>
+          <label>Supported Features</label>
           <div style="font-size: 0.85rem; background: #f8fafc; padding: 0.6rem; border-radius: var(--radius-sm); border: 1px solid var(--border);">
-            A4 Portrait &bull; Clean Typography &bull; Automatic Pagination
+            Headings &bull; Text Paragraphs &bull; Lists &bull; Simple Tables<br>
+            <span style="color: var(--text-muted); font-size: 0.8rem;">Unsupported: CSS grid/flex layout, web fonts, JavaScript, external media.</span>
           </div>
         </div>
       `;
     } else if (currentTool === 'pdf-to-word') {
       toolSettings.innerHTML = `
         <div class="setting-group">
-          <label>PDF to Word Options</label>
-          <p class="setting-hint">Extracts textual flow and paragraph headings into editable Microsoft Word (.docx) format.</p>
+          <label>PDF to Word (Beta)</label>
+          <p class="setting-hint">Extracts text and headings into Word (.docx) paragraphs. Does not support images or complex layouts.</p>
         </div>
         <div class="setting-group" style="margin-top: 0.75rem;">
           <label>Output Format</label>
@@ -3095,8 +3099,8 @@ if (typeof document !== 'undefined') {
     } else if (currentTool === 'pdf-to-excel') {
       toolSettings.innerHTML = `
         <div class="setting-group">
-          <label>PDF to Excel Options</label>
-          <p class="setting-hint">Detects data rows and clusters numeric and text cells into a Microsoft Excel workbook (.xlsx).</p>
+          <label>PDF to Excel (Beta)</label>
+          <p class="setting-hint">Extracts tabular text into Excel (.xlsx) sheets. Does not support charts, cell styling, or formulas.</p>
         </div>
         <div class="setting-group" style="margin-top: 0.75rem;">
           <label>Output Format</label>
@@ -3108,8 +3112,8 @@ if (typeof document !== 'undefined') {
     } else if (currentTool === 'pdf-to-powerpoint') {
       toolSettings.innerHTML = `
         <div class="setting-group">
-          <label>PDF to PowerPoint Options</label>
-          <p class="setting-hint">Generates 16:9 presentation slides with titles and bullet points from PDF pages.</p>
+          <label>PDF to PowerPoint (Beta)</label>
+          <p class="setting-hint">Extracts text into 16:9 presentation slides (.pptx). Does not support shapes, animations, or templates.</p>
         </div>
         <div class="setting-group" style="margin-top: 0.75rem;">
           <label>Output Format</label>

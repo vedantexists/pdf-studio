@@ -5,8 +5,8 @@
 [![Live Demo](https://img.shields.io/badge/demo-online-brightgreen.svg)](https://vedantexists.github.io/pdf-studio/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Privacy: 100% Local](https://img.shields.io/badge/privacy-100%25%20local-emerald.svg)](#-100-in-browser-privacy)
-[![Tests: 132+ Passing](https://img.shields.io/badge/tests-132%2B%20passing-brightgreen.svg)](#-automated-verification-suite)
-[![Remediation: Hardened](https://img.shields.io/badge/security-hardened%20(Phases%201--3)-blueviolet.svg)](#-remediation--hardening-architecture-phases-1-3)
+[![Tests: 19 Suites Passing](https://img.shields.io/badge/tests-19%20suites%20passing-brightgreen.svg)](#-automated-verification-suite)
+[![Audit Remediation: Verified](https://img.shields.io/badge/audit-remediated%20%26%20verified-blueviolet.svg)](#-audit-remediation--hardening-architecture)
 
 🌐 **Live Studio**: [https://vedantexists.github.io/pdf-studio/](https://vedantexists.github.io/pdf-studio/)
 
@@ -30,22 +30,22 @@
 
 ### 2. Optimize PDF
 - **Compress PDF**: In-memory stream compaction & metadata stripping reducing file size (>80% on image-heavy documents) while preserving readability.
-- **Repair PDF**: Scans token streams and synthesizes clean XRef offset tables to recover damaged or unreadable PDFs.
-- **OCR PDF (Beta)**: Injects an invisible searchable, selectable text layer locally into PDFs without external cloud uploads or heavy multi-megabyte CDN language pack downloads.
+- **Repair PDF**: Hierarchically resolves `/Root` outside stream bodies and synthesizes clean XRef tables with true Latin-1 decoding to recover broken PDFs.
+- **OCR PDF (Beta)**: Local offline OCR via bundled Tesseract WASM + worker + language data. Injects an invisible searchable text layer using line/word bboxes with zero cloud uploads or CDN requests.
 
 ### 3. Convert to PDF
 - **JPG / PNG to PDF**: Assemble images into a formatted PDF document with customizable margins and page sizes.
-- **Word to PDF (Beta)**: Basic client-side conversion of Microsoft Word (`.docx`) text and paragraphs into PDF.
-- **PowerPoint to PDF (Beta)**: Basic client-side conversion of PowerPoint (`.pptx`) slide text and notes into 16:9 PDF slides.
-- **Excel to PDF (Beta)**: Basic client-side conversion of spreadsheet (`.xlsx`) data grids into formatted table pages.
-- **HTML to PDF (Beta)**: Basic client-side conversion of HTML document markup and headings into PDF.
+- **Word to PDF (Beta)**: Converts text, headings, paragraphs, and simple tables from Word (.docx). Does not support images, CSS, or complex layout.
+- **PowerPoint to PDF (Beta)**: Converts slide titles, bullet points, and text from PowerPoint (.pptx) into 16:9 slides. Does not support images, shapes, or complex layout.
+- **Excel to PDF (Beta)**: Converts tabular cell text from Excel (.xlsx) into a landscape grid. Does not support formulas, charts, or cell styling.
+- **HTML to PDF (Beta)**: Converts text, headings, and simple tables from HTML. Does not support CSS layout, external fonts, or scripts.
 - **Text to PDF**: Convert plain text or markdown notes into cleanly formatted, paginated PDF documents.
 
 ### 4. Convert from PDF
 - **PDF to JPG / PNG**: Convert PDF pages into crisp high-resolution images (individual or ZIP).
-- **PDF to Word (Beta)**: Basic client-side extraction of PDF text and layout into editable Microsoft Word (`.docx`) files.
-- **PDF to PowerPoint (Beta)**: Basic client-side extraction of PDF pages and text content into Microsoft PowerPoint (`.pptx`) presentation slides.
-- **PDF to Excel (Beta)**: Basic client-side extraction of tabular text from PDF into Microsoft Excel (`.xlsx`) spreadsheets.
+- **PDF to Word (Beta)**: Extracts text and headings into Word (.docx) paragraphs. Does not support images or complex layouts.
+- **PDF to PowerPoint (Beta)**: Extracts text into 16:9 presentation slides (.pptx). Does not support shapes, animations, or templates.
+- **PDF to Excel (Beta)**: Extracts tabular text into Excel (.xlsx) sheets. Does not support charts, cell styling, or formulas.
 - **PDF/A Metadata (Beta)**: PDF/A metadata only (not validated, not conformant). Appends XMP metadata schema (pdfaid) and sRGB OutputIntents without font subsetting or veraPDF ISO conformance validation *(see Archival Details below)*.
 - **PDF to Text / Markdown**: Extract structured text, paragraphs, and headings from PDFs into clean Markdown or TXT.
 
@@ -86,7 +86,7 @@ All processing happens entirely in client memory using WebAssembly and pure Java
 ### 1. Password Protection (Real AES-256 In-Browser Encryption)
 - **Standard**: Uses genuine ISO 32000-1 / PDF 2.0 **AES-256** encryption (`/V 5 /R 6 /AESV3`) with Web Crypto key derivation.
 - **Cross-Reader Verification**: Encrypted PDFs are genuinely ciphered at the stream and string level. When opened in **Adobe Acrobat, Google Chrome, Mozilla Firefox, Microsoft Edge, Apple Preview, or mobile PDF readers (iOS/Android)**, the reader strictly demands the password before displaying pages or rendering content.
-- **Configurable Permissions**: Restrict copying, modification, or printing while keeping the file readable.
+- **Configurable Permissions (P Value)**: Permission flags are built directly from the PDF specification bitmask. Defaults to all permissions allowed (`P = -4`). Individual permissions (printing, copying, modifying, annotating) can be toggled on or off explicitly from the Protect dialog.
 
 ### 2. Redaction Safety (Content Stream Operator Stripping)
 - Unlike basic editors that simply place black visual rectangles over text (leaving the underlying text selectable and extractable), PDF Studio's `redactPDF` engine decompresses page content streams, strips or masks raw text operators (`Tj`, `TJ`, `'`, `"`) within the bounding box coordinates, and repacks the stream before drawing opaque blackout overlays.
@@ -101,8 +101,10 @@ All processing happens entirely in client memory using WebAssembly and pure Java
 > - **Legal Validity**: While electronic signature stamps are commonly accepted for informal contracts, internal approvals, receipts, and day-to-day forms, formal government filings, legal deeds, and regulated financial contracts may legally mandate certified cryptographic digital signatures. Always verify the compliance requirements of your jurisdiction and counterparty.
 
 ### 4. Office Conversions & PDF/A Conformance Disclosures
-- **Office Conversions (Beta)**: Built on pure client-side OpenXML ZIP parsers (`docx`, `pptx`, `xlsx`) designed for text, paragraphs, and table extraction without sending documents to third-party conversion servers. Complex desktop typography, macro scripting, and advanced floating shapes may render in simplified layouts compared to full native Microsoft Office or LibreOffice rendering.
-- **PDF/A Metadata (Beta)**: PDF/A metadata only (not validated, not conformant). Injects the XMP metadata schema (pdfaid) and sRGB OutputIntents dictionary. It does not validate against ISO 19005-1, does not embed missing fonts, and does not claim or guarantee ISO conformance under validators such as veraPDF.
+- **Office Conversions (Beta)**: Built on pure client-side OpenXML ZIP parsers (`docx`, `pptx`, `xlsx`) and lightweight HTML parsing designed strictly for text, headings, and simple tables without sending documents to third-party conversion servers.
+  - **What is supported**: Text paragraphs, headings, bullet lists, simple tabular data grids, and basic formatting.
+  - **What is NOT supported**: Images, CSS styling, complex floating layouts, header/footer drawings, formulas, charts, shapes, animations, external fonts, or JavaScript.
+- **PDF/A Metadata (Beta)**: **PDF/A metadata only (not validated, not conformant)**. Appends the XMP metadata schema (`pdfaid`) and sRGB OutputIntents dictionary. It does not validate against ISO 19005-1, does not embed missing fonts or ICC profiles, and does not claim or guarantee ISO conformance under validators such as veraPDF.
 
 ---
 
@@ -143,6 +145,14 @@ PDF Studio has undergone comprehensive multi-phase engine hardening to guarantee
   - Responsive touch reordering bar on Organize PDF page thumbnails for viewports `≤ 900px`.
   - Accessible 40px+ tap targets with `touch-action: manipulation` for instant response without double-tap delay, eliminating horizontal layout overflow on narrow mobile devices.
 
+### Phase 4: Independent Security & Acceptance Audit Remediation
+- **PDF Permission Flags (P Value)**: Standard 32-bit permission bitmask construction from the PDF specification. Defaults to all permissions allowed (`P = -4`) with explicit UI toggles for printing, copying, modifying, and annotating, validated by `qpdf --show-encryption`.
+- **Repair Engine Catalog Resolution**: Hierarchically resolves genuine `/Root` Catalog dictionaries outside stream contents (trailer dictionary, XRef stream, genuine Catalog objects) and enforces true Latin-1 byte-to-char mapping (mapping byte 128 to char code 128 without cp1252 remapping).
+- **Offline Bundled Tesseract WASM OCR**: Bundled local Tesseract.js WASM, worker, and English language data (`eng.traineddata`) under `vendor/tesseract/`. Eliminated all fake placeholder text. Searchable invisible text layer placed via line/word bounding boxes with WinAnsi character encoding defense.
+- **Truthful PDF/A Labeling**: Relabeled everywhere as "PDF/A metadata only (not validated, not conformant)" with all ISO conformance claims removed.
+- **Hygiene & Strict CSP**: Self-hosted WOFF2 fonts (Caveat, Dancing Script, Great Vibes) under `vendor/fonts/`, enforced strict Content Security Policy (`connect-src 'none'`), thorough innerHTML XSS sanitization (including filename injection vectors), and verified zero runtime network egress.
+- **Test Integrity & CI**: All 19 test suites chained in `package.json` with strict non-zero exit on failure, GitHub Actions CI workflow, non-zero assertion counts across all adversarial suites, and multi-reader validation using QPDF (`--check`), PDF.js, and PDFium.
+
 ---
 
 ## Quick Start
@@ -162,7 +172,7 @@ Then visit [http://localhost:3000](http://localhost:3000).
 ---
 
 ## 🧪 Automated Verification Suite
-Run the 132+ test automated verification harness covering security redlines, offline invariants, memory lifecycles, and zero-network egress traps:
+Run the 19-suite automated verification harness covering security redlines, offline invariants, memory lifecycles, and zero-network egress traps:
 ```bash
 npm test
 ```
