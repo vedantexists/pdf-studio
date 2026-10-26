@@ -21,7 +21,21 @@
  *     - Outbound request interception across all compare and compress operations
  */
 
-const assert = require('assert');
+let assertionCount = 0;
+const _rawAssert = require('assert');
+function assert(...args) {
+  assertionCount++;
+  return _rawAssert(...args);
+}
+Object.assign(assert, _rawAssert);
+for (const fn of ['strictEqual', 'notStrictEqual', 'deepStrictEqual', 'notDeepStrictEqual', 'ok', 'rejects', 'throws', 'doesNotReject', 'doesNotThrow']) {
+  if (typeof _rawAssert[fn] === 'function') {
+    assert[fn] = function (...args) {
+      assertionCount++;
+      return _rawAssert[fn].apply(_rawAssert, args);
+    };
+  }
+}
 const http = require('http');
 const https = require('https');
 const net = require('net');
@@ -727,10 +741,11 @@ async function runAllChallenges() {
   // Summary
   // ==========================================================================
   console.log('\n====================================================================');
-  console.log(`Milestone 2 Challenge Results: ${passedCount} Passed, ${failedCount} Failed`);
+  console.log(`Milestone 2 Challenge Results: ${passedCount} Passed | ${failedCount} Failed | Assertions: ${assertionCount}`);
   console.log('====================================================================\n');
 
-  if (failedCount > 0) {
+  if (failedCount > 0 || assertionCount === 0) {
+    if (assertionCount === 0) console.error('FAILED: Zero assertions executed!');
     process.exit(1);
   }
 }

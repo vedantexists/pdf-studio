@@ -2,7 +2,21 @@ const { spawn, spawnSync, execSync } = require('child_process');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const assert = require('assert');
+let assertionCount = 0;
+const _rawAssert = require('assert');
+function assert(...args) {
+  assertionCount++;
+  return _rawAssert(...args);
+}
+Object.assign(assert, _rawAssert);
+for (const fn of ['strictEqual', 'notStrictEqual', 'deepStrictEqual', 'notDeepStrictEqual', 'ok', 'rejects', 'throws', 'doesNotReject', 'doesNotThrow']) {
+  if (typeof _rawAssert[fn] === 'function') {
+    assert[fn] = function (...args) {
+      assertionCount++;
+      return _rawAssert[fn].apply(_rawAssert, args);
+    };
+  }
+}
 
 const ROOT = path.resolve(__dirname, '..');
 const PORT = 3891;
@@ -163,7 +177,11 @@ print("  [PASS] All OCR acceptance criteria passed!")
     process.exit(1);
   }
 
+  assert(pyRes.status === 0, 'OCR verification python check must pass');
+  console.log(`Passed: 1 | Failed: 0 | Assertions: ${assertionCount}`);
+
   try { if (fs.existsSync(outPdfPath)) fs.unlinkSync(outPdfPath); } catch {}
+  if (assertionCount === 0) throw new Error('Zero assertions executed in test_ocr_acceptance');
 }
 
 if (require.main === module) {

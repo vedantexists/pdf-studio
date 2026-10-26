@@ -249,7 +249,7 @@ async function runPhase3Tests() {
     assert(indexHtml.includes('mobile touch reordering'), 'index.html must describe Organize mobile touch reordering');
 
     // package.json consolidated test runner
-    assert(pkg.scripts.test.includes('test_phase4_audit.js') && !pkg.scripts.test.includes('--conditional'), 'npm test must run audit suite without --conditional');
+    assert((pkg.scripts.test.includes('test/run_all.js') || pkg.scripts.test.includes('test_phase4_audit.js')) && !pkg.scripts.test.includes('--conditional'), 'npm test must run dynamic test runner without --conditional');
     assert(pkg.scripts['test:core'] && pkg.scripts['test:audit'] && pkg.scripts['test:security'], 'package.json must provide test:core, test:audit, and test:security scripts');
     console.log('  ✓ README multi-phase docs, UI disclosures, and package.json test scripts verified');
   }

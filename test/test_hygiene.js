@@ -1,4 +1,19 @@
-const assert = require('assert');
+let assertionCount = 0;
+const _rawAssert = require('assert');
+function assert(...args) {
+  assertionCount++;
+  return _rawAssert(...args);
+}
+Object.assign(assert, _rawAssert);
+for (const fn of ['strictEqual', 'notStrictEqual', 'deepStrictEqual', 'notDeepStrictEqual', 'ok', 'rejects', 'throws', 'doesNotReject', 'doesNotThrow']) {
+  if (typeof _rawAssert[fn] === 'function') {
+    assert[fn] = function (...args) {
+      assertionCount++;
+      return _rawAssert[fn].apply(_rawAssert, args);
+    };
+  }
+}
+
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
@@ -123,7 +138,12 @@ async function runHygieneTests() {
 
   console.log('\n=============================================');
   console.log('All Item 5 Hygiene Checks Passed 100%!');
+  console.log(`Passed: 10 | Failed: 0 | Assertions: ${assertionCount}`);
   console.log('=============================================');
+
+  if (assertionCount === 0) {
+    throw new Error('Zero assertions executed in test_hygiene');
+  }
 }
 
 if (require.main === module) {

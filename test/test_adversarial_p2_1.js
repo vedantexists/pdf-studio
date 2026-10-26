@@ -547,7 +547,8 @@ async function run() {
   console.log(`Challenger P2-1 Adversarial Results: ${passCount} Passed | ${failCount} Failed | Assertions: ${assertionCount}`);
   console.log('================================================================\n');
 
-  if (failCount > 0) {
+  if (failCount > 0 || assertionCount === 0) {
+    if (assertionCount === 0) console.error('FAILED: Zero assertions were executed!');
     console.error(`Total failures: ${failCount}`);
     failures.forEach((f, idx) => {
       console.error(`  ${idx + 1}. [${f.name}] -> ${f.error.message}`);
