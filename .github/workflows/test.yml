@@ -43,10 +43,5 @@ jobs:
           python --version
           qpdf --version | head -n 1
 
-      - name: Deliberately failing test check (proves workflow can go red)
-        run: |
-          echo "Deliberately failing verification step to prove CI goes red"
-          exit 1
-
       - name: Run full test suite
         run: npm test
