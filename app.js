@@ -2990,19 +2990,14 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="setting-group">
           <label for="ocrLangSelect">Recognition Language</label>
           <select id="ocrLangSelect" class="form-select">
-            <option value="eng" selected>English (Latin)</option>
-            <option value="spa">Spanish (Español)</option>
-            <option value="fra">French (Français)</option>
-            <option value="deu">German (Deutsch)</option>
-            <option value="chi_sim">Chinese Simplified (简体中文)</option>
-            <option value="jpn">Japanese (日本語)</option>
+            <option value="eng" selected>English (Offline Bundled)</option>
           </select>
           ${!wasmLoaded ? `
             <div style="background:#fffbeb; border:1px solid #fef3c7; color:#92400e; padding:0.6rem; border-radius:var(--radius-sm); font-size:0.8rem; margin-top:0.65rem; line-height:1.4;">
               ⚠️ <strong>WASM Engine Unavailable:</strong> Tesseract WASM is not loaded. OCR requires the WebAssembly runtime to process image text offline.
             </div>
           ` : `
-            <p class="setting-hint">100% private in-browser OCR engine generates a searchable, selectable text layer directly in your PDF.</p>
+            <p class="setting-hint">100% private in-browser OCR engine generates a searchable, selectable text layer directly in your PDF using local WebAssembly.</p>
           `}
         </div>
       `;

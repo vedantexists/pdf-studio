@@ -3059,6 +3059,21 @@
     const font = await doc.embedFont(StandardFonts.Helvetica);
     const lang = options.lang || 'eng';
 
+    // Helper to sanitize string for standard WinAnsi encoding
+    function toWinAnsi(str) {
+      if (!str) return '';
+      let res = '';
+      for (const ch of str) {
+        try {
+          font.encodeText(ch);
+          res += ch;
+        } catch {
+          res += ' ';
+        }
+      }
+      return res;
+    }
+
     // 1. Client-Side Browser Execution via Tesseract.js (if available)
     if (typeof window !== 'undefined') {
       if (!window.Tesseract || typeof window.Tesseract.recognize !== 'function') {
@@ -3068,111 +3083,139 @@
       }
     }
 
-    if (typeof window !== 'undefined' && window.Tesseract && window.pdfjsLib) {
-      for (let i = 0; i < totalPages; i++) {
-        const page = doc.getPage(i);
-        const { width, height } = page.getSize();
-        let canvas = null;
+    if (typeof window !== 'undefined' && window.Tesseract && window.pdfjsLib && !options.mockText && !options.mockPages) {
+      const workerOptions = {
+        workerPath: options.workerPath || 'vendor/tesseract/worker.min.js',
+        corePath: options.corePath || 'vendor/tesseract/tesseract-core-simd.wasm.js',
+        langPath: options.langPath || 'vendor/tesseract',
+        workerBlobURL: false,
+        gzip: true,
+      };
+
+      let worker = null;
+      if (typeof window.Tesseract.createWorker === 'function') {
         try {
-          const loadingTask = window.pdfjsLib.getDocument({ data: bytes.slice() });
-          const pdfDoc = await loadingTask.promise;
-          const pdfPage = await pdfDoc.getPage(i + 1);
-          const viewport = pdfPage.getViewport({ scale: 1.5 });
-          canvas = document.createElement('canvas');
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-          const ctx = canvas.getContext('2d');
-          await pdfPage.render({ canvasContext: ctx, viewport }).promise;
-
-          const { data } = await window.Tesseract.recognize(canvas, lang);
-          if (data && Array.isArray(data.lines) && data.lines.length > 0) {
-            for (const line of data.lines) {
-              const text = (line.text || '').trim();
-              if (!text) continue;
-              const bbox = line.bbox;
-              const scaleX = width / canvas.width;
-              const scaleY = height / canvas.height;
-              const pdfX = bbox.x0 * scaleX;
-              const pdfY = height - (bbox.y1 * scaleY);
-              const fontSize = Math.max(8, (bbox.y1 - bbox.y0) * scaleY * 0.85);
-
-              page.drawText(text, {
-                x: pdfX,
-                y: pdfY,
-                size: fontSize,
-                font,
-                opacity: 0,
-              });
-            }
-          }
-          await pdfDoc.destroy();
-        } catch (e) {
-          // Fall back to fallback logic below
-        } finally {
-          if (canvas) { canvas.width = 0; canvas.height = 0; }
+          worker = await window.Tesseract.createWorker(lang, 1, workerOptions);
+        } catch (workerInitErr) {
+          worker = null;
         }
       }
+
+      let pdfDoc = null;
+      try {
+        const loadingTask = window.pdfjsLib.getDocument({ data: bytes.slice() });
+        pdfDoc = await loadingTask.promise;
+
+        for (let i = 0; i < totalPages; i++) {
+          const page = doc.getPage(i);
+          const { width, height } = page.getSize();
+          let canvas = null;
+          try {
+            const pdfPage = await pdfDoc.getPage(i + 1);
+            const viewport = pdfPage.getViewport({ scale: 2.0 });
+            canvas = document.createElement('canvas');
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            const ctx = canvas.getContext('2d');
+            await pdfPage.render({ canvasContext: ctx, viewport }).promise;
+
+            const res = worker
+              ? await worker.recognize(canvas)
+              : await window.Tesseract.recognize(canvas, lang, workerOptions);
+            const data = res && res.data;
+
+            if (data && Array.isArray(data.lines) && data.lines.length > 0) {
+              for (const line of data.lines) {
+                if (Array.isArray(line.words) && line.words.length > 0) {
+                  for (const word of line.words) {
+                    const rawWord = (word.text || '').trim();
+                    if (!rawWord) continue;
+                    const safeWord = toWinAnsi(rawWord);
+                    if (!safeWord.trim()) continue;
+
+                    const bbox = word.bbox;
+                    const scaleX = width / canvas.width;
+                    const scaleY = height / canvas.height;
+                    const pdfX = bbox.x0 * scaleX;
+                    const pdfY = height - (bbox.y1 * scaleY);
+                    const fontSize = Math.max(6, Math.min(72, (bbox.y1 - bbox.y0) * scaleY * 0.85));
+
+                    page.drawText(safeWord, {
+                      x: pdfX,
+                      y: pdfY,
+                      size: fontSize,
+                      font,
+                      opacity: 0,
+                    });
+                  }
+                } else {
+                  const text = (line.text || '').trim();
+                  if (!text) continue;
+                  const safeLine = toWinAnsi(text);
+                  if (!safeLine.trim()) continue;
+
+                  const bbox = line.bbox;
+                  const scaleX = width / canvas.width;
+                  const scaleY = height / canvas.height;
+                  const pdfX = bbox.x0 * scaleX;
+                  const pdfY = height - (bbox.y1 * scaleY);
+                  const fontSize = Math.max(6, Math.min(72, (bbox.y1 - bbox.y0) * scaleY * 0.85));
+
+                  page.drawText(safeLine, {
+                    x: pdfX,
+                    y: pdfY,
+                    size: fontSize,
+                    font,
+                    opacity: 0,
+                  });
+                }
+              }
+            }
+          } catch (pageErr) {
+            throw new Error(`OCR processing failed on page ${i + 1}: ${pageErr.message || pageErr}`);
+          } finally {
+            if (canvas) { canvas.width = 0; canvas.height = 0; }
+          }
+        }
+      } finally {
+        if (worker && typeof worker.terminate === 'function') {
+          try { await worker.terminate(); } catch (_) {}
+        }
+        if (pdfDoc && typeof pdfDoc.destroy === 'function') {
+          try { await pdfDoc.destroy(); } catch (_) {}
+        }
+      }
+
       return await doc.save();
     }
 
-    // 2. Headless / Node.js test environment or fallback
-    let existingTextByPage = {};
-    let pdfjs = null;
-    if (typeof window !== 'undefined' && window.pdfjsLib) {
-      pdfjs = window.pdfjsLib;
-    } else if (typeof require !== 'undefined') {
-      try {
-        pdfjs = require('pdfjs-dist/legacy/build/pdf.js');
-      } catch (e) {
-        try { pdfjs = require('pdfjs-dist'); } catch (e2) {}
-      }
-    }
+    // 2. Deterministic mock text injection (for testing)
+    if (options.mockText || options.text || options.mockPages) {
+      for (let i = 0; i < totalPages; i++) {
+        const page = doc.getPage(i);
+        const { width, height } = page.getSize();
+        let textToInject = '';
 
-    if (pdfjs && typeof pdfjs.getDocument === 'function') {
-      let pdfjsDoc = null;
-      try {
-        const loadingTask = pdfjs.getDocument({ data: bytes.slice() });
-        pdfjsDoc = await loadingTask.promise;
-        for (let i = 1; i <= pdfjsDoc.numPages; i++) {
-          const p = await pdfjsDoc.getPage(i);
-          const tc = await p.getTextContent();
-          existingTextByPage[i - 1] = tc.items.map(it => it.str).join(' ').trim();
+        if (options.mockText || options.text) {
+          textToInject = options.mockText || options.text;
+        } else if (options.mockPages && options.mockPages[i]) {
+          textToInject = options.mockPages[i];
         }
-      } catch (e) {
-      } finally {
-        if (pdfjsDoc && typeof pdfjsDoc.destroy === 'function') {
-          try { await pdfjsDoc.destroy(); } catch (e) {}
-        }
-      }
-    }
 
-    for (let i = 0; i < totalPages; i++) {
-      const page = doc.getPage(i);
-      const { width, height } = page.getSize();
-      let textToInject = '';
-
-      if (options.mockText || options.text) {
-        textToInject = options.mockText || options.text;
-      } else if (options.mockPages && options.mockPages[i]) {
-        textToInject = options.mockPages[i];
-      } else if (!existingTextByPage[i]) {
-        // Scanned page without text layer: inject structured searchable OCR text
-        textToInject = `Page ${i + 1} Recognized OCR Text Content`;
-      }
-
-      if (textToInject) {
-        const lines = textToInject.split('\n').map(l => l.trim()).filter(Boolean);
-        let startY = height - 50;
-        for (const line of lines) {
-          if (startY < 40) break;
-          page.drawText(line, {
-            x: 50,
-            y: startY,
-            size: 11,
-            font,
-            opacity: 0,
-          });
-          startY -= 18;
+        if (textToInject) {
+          const lines = textToInject.split('\n').map(l => l.trim()).filter(Boolean);
+          let startY = height - 50;
+          for (const line of lines) {
+            if (startY < 40) break;
+            page.drawText(toWinAnsi(line), {
+              x: 50,
+              y: startY,
+              size: 11,
+              font,
+              opacity: 0,
+            });
+            startY -= 18;
+          }
         }
       }
     }

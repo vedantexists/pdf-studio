@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="/vendor/pdf-lib.min.js"></script>
+  <script src="/vendor/pdf.min.js"></script>
+  <script src="/vendor/tesseract/tesseract.min.js"></script>
+  <script src="/pdf_core.js"></script>
+</head>
+<body>
+  <h1>OCR Test Harness</h1>
+  <script>
+    (async () => {
+      try {
+        console.log('OCR_TEST: Starting harness');
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = '/vendor/pdf.worker.min.js';
+
+        // Fetch image_only_sample.pdf
+        const resp = await fetch('/test/image_only_sample.pdf');
+        const sampleBytes = new Uint8Array(await resp.arrayBuffer());
+        console.log('OCR_TEST: Fetched sample, bytes:', sampleBytes.length);
+
+        const ocrResult = await PDFCore.ocrPDF(sampleBytes, {
+          lang: 'eng',
+          workerPath: '/vendor/tesseract/worker.min.js',
+          corePath: '/vendor/tesseract/tesseract-core-simd.wasm.js',
+          langPath: '/vendor/tesseract',
+        });
+        console.log('OCR_TEST: OCR completed, output bytes:', ocrResult.length);
+
+        // POST result to /save_ocr
+        await fetch('/save_ocr', {
+          method: 'POST',
+          body: ocrResult,
+          headers: { 'Content-Type': 'application/pdf' }
+        });
+        console.log('OCR_TEST: Posted to /save_ocr');
+      } catch (err) {
+        console.log('OCR_TEST: ERROR: ' + (err.stack || err.message));
+      }
+    })();
+  </script>
+</body>
+</html>

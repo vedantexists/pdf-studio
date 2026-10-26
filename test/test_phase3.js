@@ -134,13 +134,13 @@ async function runPhase3Tests() {
     assert(extracted.includes('Recognized In-Memory OCR Document Content'), 'Text layer must be extractable via pdfToText');
     console.log('  ✓ Searchable text layer verified extractable via pdfToText');
 
-    // OCR auto-fallback without options
+    // OCR on blank pages produces no invented text layer
     const ocrAuto = await PDFCore.ocrPDF(pdfBytes, { lang: 'eng' });
     const autoDoc = await PDFDocument.load(ocrAuto);
     assert.strictEqual(autoDoc.getPageCount(), 2);
-    const autoText = await PDFCore.pdfToText(ocrAuto);
-    assert(autoText.includes('Recognized OCR Text Content') || autoText.includes('Page 1'), 'Auto text layer extractable');
-    console.log('  ✓ ocrPDF default text layer injection verified');
+    const autoTextPlain = await PDFCore.pdfToText(ocrAuto, { format: 'plain' });
+    assert.strictEqual(autoTextPlain.trim(), '', 'Blank pages must yield no recognized text');
+    console.log('  ✓ ocrPDF blank pages yield no invented text');
 
     // Boundary cases
     await assert.rejects(() => PDFCore.ocrPDF(null), /required/i);
