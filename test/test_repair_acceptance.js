@@ -1,4 +1,19 @@
-const assert = require('assert');
+let assertionCount = 0;
+const _rawAssert = require('assert');
+function assert(...args) {
+  assertionCount++;
+  return _rawAssert(...args);
+}
+Object.assign(assert, _rawAssert);
+for (const fn of ['strictEqual', 'notStrictEqual', 'deepStrictEqual', 'notDeepStrictEqual', 'ok', 'rejects', 'throws', 'doesNotReject', 'doesNotThrow']) {
+  if (typeof _rawAssert[fn] === 'function') {
+    assert[fn] = function (...args) {
+      assertionCount++;
+      return _rawAssert[fn].apply(_rawAssert, args);
+    };
+  }
+}
+
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -118,7 +133,51 @@ async function runRepairAcceptance() {
   fs.unlinkSync(tmpPath3);
   console.log('✓ PDF 1.5+ XRef Stream document repaired, opens in pdfjs, and passes qpdf --check\n');
 
-  console.log('All 3 repairPDF acceptance verification tests PASSED cleanly!');
+  // 4. Stream Length Desynchronization via Injected 70 Bytes
+  console.log('--- 4. Repair Stream with Injected 70 Bytes and Desynchronized /Length ---');
+  const basePdf = '%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 400] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n4 0 obj\n<< /Length 61 >>\nstream\nBT /F1 14 Tf 50 350 Td (Genuine Injected Content Stream Recovery) Tj ET\nendstream\nendobj\n5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\nxref\n0 6\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n0000000244 00000 n \n0000000358 00000 n \ntrailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n437\n%%EOF\n';
+
+  const sm4 = basePdf.indexOf('stream\n');
+  assert(sm4 > 0, 'Base PDF must contain stream keyword');
+
+  // Inject exactly 70 bytes before genuine text operators
+  const extra70 = '% Extra 70 bytes injected here: 1234567890123456789012345678901234567\n';
+  assert.strictEqual(extra70.length, 70, 'Injection must be exactly 70 bytes');
+
+  const brokenPdf4 = basePdf.slice(0, sm4 + 7) + extra70 + basePdf.slice(sm4 + 7);
+  const brokenBytes4 = Buffer.from(brokenPdf4, 'latin1');
+
+  // Verify that the broken file fails qpdf check or reports damage
+  const tmpBrokenPath = path.join(tmpDir, `repair_broken_stream_${Date.now()}.pdf`);
+  fs.writeFileSync(tmpBrokenPath, brokenBytes4);
+  let brokenFailed = false;
+  try {
+    const brokenCheck = execSync(`${qpdfCmd} --check "${tmpBrokenPath}"`, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    if (/damaged|error/i.test(brokenCheck)) brokenFailed = true;
+  } catch (err) {
+    brokenFailed = true;
+  }
+  fs.unlinkSync(tmpBrokenPath);
+  assert(brokenFailed, 'Broken PDF with mismatched stream /Length must be detected as damaged');
+
+  // Run repairPDF
+  const repaired4 = await PDFCore.repairPDF(brokenBytes4);
+  assert(repaired4 instanceof Uint8Array, 'Repaired output must be Uint8Array');
+
+  // Verify repaired file passes qpdf --check with zero errors
+  const tmpPath4 = path.join(tmpDir, `repair_stream_desync_${Date.now()}.pdf`);
+  fs.writeFileSync(tmpPath4, Buffer.from(repaired4));
+  const qpdfCheck4 = execSync(`${qpdfCmd} --check "${tmpPath4}"`, { encoding: 'utf8' });
+  assert(/No syntax or stream encoding errors found/i.test(qpdfCheck4), `qpdf --check must pass cleanly without syntax/stream errors: ${qpdfCheck4}`);
+  fs.unlinkSync(tmpPath4);
+
+  // Verify that genuine page text is recovered via pdfToText
+  const extractedText4 = await PDFCore.pdfToText(repaired4);
+  assert(extractedText4.includes('Genuine Injected Content Stream Recovery'), 'Page text must be recovered via pdfToText after stream length repair');
+  console.log('✓ Injected 70-byte stream repaired, passes qpdf --check, and recovers genuine page text\n');
+
+  console.log('All 4 repairPDF acceptance verification tests PASSED cleanly!');
+  console.log(`Passed: 4 | Failed: 0 | Assertions: ${assertionCount}`);
 }
 
 runRepairAcceptance().catch((err) => {

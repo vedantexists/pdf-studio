@@ -142,6 +142,9 @@
         decode: (bytes) => {
           const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
           return Buffer.from(u8.buffer, u8.byteOffset, u8.byteLength).toString('latin1');
+        },
+        encode: (str) => {
+          return new Uint8Array(Buffer.from(str, 'latin1'));
         }
       };
     }
@@ -163,6 +166,13 @@
           res += fromCC.apply(null, u8.subarray(i, Math.min(u8.length, i + CHUNK)));
         }
         return res;
+      },
+      encode: (str) => {
+        const u8 = new Uint8Array(str.length);
+        for (let i = 0; i < str.length; i++) {
+          u8[i] = str.charCodeAt(i) & 0xFF;
+        }
+        return u8;
       }
     };
   })();
@@ -1377,6 +1387,61 @@
     if (!pdfBytes) throw new Error('PDF bytes are required to repair.');
     let bytes = pdfBytes instanceof Uint8Array ? pdfBytes.slice() : new Uint8Array(pdfBytes);
 
+    let fullStr = latin1Decoder.decode(bytes);
+
+    // Recompute stream lengths from endstream markers if extra bytes were injected or lengths desynchronized
+    const streamPattern = /(\d+)\s+(\d+)\s+obj\s*<<([\s\S]*?)>>\s*stream(\r?\n|\r)/g;
+    const streamMatches = [];
+    let sm;
+    while ((sm = streamPattern.exec(fullStr)) !== null) {
+      const streamDataStart = sm.index + sm[0].length;
+      const esPattern = /(\r?\n|\r)endstream[\s\r\n]*endobj/g;
+      esPattern.lastIndex = streamDataStart;
+      const esMatch = esPattern.exec(fullStr);
+      if (!esMatch) continue;
+
+      const streamDataEnd = esMatch.index;
+      const actualLength = streamDataEnd - streamDataStart;
+
+      const dict = sm[3];
+      const lenMatch = dict.match(/\/Length\s+(\d+)/);
+      const indMatch = dict.match(/\/Length\s+(\d+)\s+(\d+)\s+R/);
+
+      let oldLength = null;
+      if (lenMatch) oldLength = parseInt(lenMatch[1], 10);
+
+      if (oldLength !== actualLength) {
+        streamMatches.push({
+          headerStart: sm.index,
+          headerLen: sm[0].length,
+          dict,
+          actualLength,
+          lenMatch,
+          indMatch
+        });
+      }
+    }
+
+    let streamsResynchronized = false;
+    if (streamMatches.length > 0) {
+      for (let i = streamMatches.length - 1; i >= 0; i--) {
+        const item = streamMatches[i];
+        let newDict = item.dict;
+        if (item.lenMatch) {
+          newDict = newDict.replace(/\/Length\s+\d+/, '/Length ' + item.actualLength);
+        } else if (item.indMatch) {
+          newDict = newDict.replace(/\/Length\s+\d+\s+\d+\s+R/, '/Length ' + item.actualLength);
+        } else {
+          newDict = newDict + '\n/Length ' + item.actualLength;
+        }
+        const oldHeader = fullStr.slice(item.headerStart, item.headerStart + item.headerLen);
+        const newHeader = oldHeader.replace('<<' + item.dict + '>>', '<<' + newDict + '>>');
+        fullStr = fullStr.slice(0, item.headerStart) + newHeader + fullStr.slice(item.headerStart + item.headerLen);
+      }
+      bytes = latin1Decoder.encode(fullStr);
+      streamsResynchronized = true;
+    }
+
     const tailSlice = bytes.slice(Math.max(0, bytes.length - 2048));
     const tailStr = latin1Decoder.decode(tailSlice);
 
@@ -1394,11 +1459,11 @@
     }
 
     let useObjStreams = hasXRefStream;
-    let needsRepair = false;
+    let needsRepair = streamsResynchronized;
     const hasValidTrailer = (tailStr.includes('trailer') || hasXRefStream) && tailStr.includes('startxref') && tailStr.includes('%%EOF');
     if (!hasValidTrailer || tailStr.lastIndexOf('startxref') < tailStr.lastIndexOf('endobj')) {
       needsRepair = true;
-    } else {
+    } else if (!needsRepair) {
       try {
         const testDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
         if (!testDoc.catalog || !testDoc.catalog.get(PDFName.of('Pages'))) {

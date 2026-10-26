@@ -5,7 +5,7 @@
 [![Live Demo](https://img.shields.io/badge/demo-online-brightgreen.svg)](https://vedantexists.github.io/pdf-studio/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Privacy: 100% Local](https://img.shields.io/badge/privacy-100%25%20local-emerald.svg)](#-100-in-browser-privacy)
-[![Tests: 132+ Passing](https://img.shields.io/badge/tests-132%2B%20passing-brightgreen.svg)](#-automated-verification-suite)
+[![Tests: 471 Passing](https://img.shields.io/badge/tests-471%20passing-brightgreen.svg)](#-automated-verification-suite)
 [![Audit Remediation: Verified](https://img.shields.io/badge/audit-remediated%20%26%20verified-blueviolet.svg)](#-audit-remediation--hardening-architecture)
 
 🌐 **Live Studio**: [https://vedantexists.github.io/pdf-studio/](https://vedantexists.github.io/pdf-studio/)
@@ -146,12 +146,12 @@ PDF Studio has undergone comprehensive multi-phase engine hardening to guarantee
   - Accessible 40px+ tap targets with `touch-action: manipulation` for instant response without double-tap delay, eliminating horizontal layout overflow on narrow mobile devices.
 
 ### Phase 4: Independent Security & Acceptance Audit Remediation
-- **PDF Permission Flags (P Value)**: Standard 32-bit permission bitmask construction from the PDF specification. Defaults to all permissions allowed (`P = -4`) with explicit UI toggles for printing, copying, modifying, and annotating, validated by `qpdf --show-encryption`.
-- **Repair Engine Catalog Resolution**: Hierarchically resolves genuine `/Root` Catalog dictionaries outside stream contents (trailer dictionary, XRef stream, genuine Catalog objects) and enforces true Latin-1 byte-to-char mapping (mapping byte 128 to char code 128 without cp1252 remapping).
-- **Offline Bundled Tesseract WASM OCR**: Bundled local Tesseract.js WASM, worker, and English language data (`eng.traineddata`) under `vendor/tesseract/`. Eliminated all fake placeholder text. Searchable invisible text layer placed via line/word bounding boxes with WinAnsi character encoding defense.
+- **PDF Permission Flags & Configurable Protect Dialog**: Standard 32-bit permission bitmask construction from ISO 32000-1 Table 22. Defaults to all permissions allowed (`P = -4`) with explicit UI checkboxes for printing, copying, modifying, and annotating across both the workspace settings and modal dialogs, verified in headless browser with `qpdf --show-encryption`.
+- **Repair Engine Catalog & Stream Length Resolution**: Hierarchically resolves genuine `/Root` Catalog dictionaries outside stream contents, enforces true Latin-1 byte-to-char mapping, and automatically recomputes desynchronized `/Length` dictionaries directly from `endstream` markers to recover genuine page text and pass `qpdf --check`.
+- **Offline Bundled Tesseract WASM OCR**: Bundled local Tesseract.js WASM, worker, and English language data (`eng.traineddata`) under `vendor/tesseract/`. Eliminated all fake placeholder text. Searchable invisible text layer placed via line/word bounding boxes, strict error throwing when engine is missing in Node, and transparent `failedPages` tracking.
 - **Truthful PDF/A Labeling**: Relabeled everywhere as "PDF/A metadata only (not validated, not conformant)" with all ISO conformance claims removed.
 - **Hygiene & Strict CSP**: Self-hosted WOFF2 fonts (Caveat, Dancing Script, Great Vibes) under `vendor/fonts/`, enforced strict Content Security Policy (`connect-src 'none'`), thorough innerHTML XSS sanitization (including filename injection vectors), and verified zero runtime network egress.
-- **Test Integrity & CI**: All 19 test suites chained in `package.json` with strict non-zero exit on failure, GitHub Actions CI workflow, non-zero assertion counts across all adversarial suites, and multi-reader validation using QPDF (`--check`), PDF.js, and PDFium.
+- **Test Integrity & Dynamic CI Runner**: Dynamic test runner (`test/run_all.js`) executing all 28 test suites dynamically without hand-maintained lists, collecting pass/fail and assertion counts with non-zero exit on failure or zero assertions, running matrix on Node 20 and Node 22 in CI, and multi-reader validation using QPDF (`--check`), PDF.js, and PDFium.
 
 ---
 
@@ -172,7 +172,7 @@ Then visit [http://localhost:3000](http://localhost:3000).
 ---
 
 ## 🧪 Automated Verification Suite
-Run the 19-suite automated verification harness covering security redlines, offline invariants, memory lifecycles, and zero-network egress traps:
+Run the 28-suite automated dynamic verification harness covering security redlines, offline invariants, memory lifecycles, and zero-network egress traps:
 ```bash
 npm test
 ```
