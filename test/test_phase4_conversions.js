@@ -12,8 +12,59 @@
  */
 
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+const { execSync } = require('child_process');
 const JSZip = require('jszip');
 const PDFCore = require('../pdf_core.js');
+const pdfjs = require('pdfjs-dist/legacy/build/pdf.js');
+
+function getQpdfPath() {
+  try {
+    execSync('qpdf --version', { stdio: 'ignore' });
+    return 'qpdf';
+  } catch (e) {
+    const localAppData = process.env.LOCALAPPDATA || '';
+    const candidate = path.join(localAppData, 'qpdf', 'qpdf-12.4.2-msvc64', 'bin', 'qpdf.exe');
+    if (fs.existsSync(candidate)) return `"${candidate}"`;
+  }
+  return null;
+}
+
+const qpdfCmd = getQpdfPath();
+
+async function verifyPdfWithReaders(pdfBytes, label) {
+  // 1. pdfjs open-ability check
+  const loadingTask = pdfjs.getDocument({ data: pdfBytes.slice() });
+  const doc = await loadingTask.promise;
+  assert(doc.numPages > 0, `${label}: PDFJS must parse document with > 0 pages (got ${doc.numPages})`);
+  const page = await doc.getPage(1);
+  assert(page.view && page.view.length === 4, `${label}: PDFJS must parse page 1 viewport`);
+  await doc.destroy();
+
+  // 2. Write to temp file for external readers (qpdf and pdfium)
+  const tmpPath = path.join(os.tmpdir(), `test_conv_${Date.now()}_${Math.random().toString(36).slice(2)}.pdf`);
+  fs.writeFileSync(tmpPath, Buffer.from(pdfBytes));
+
+  try {
+    // 3. qpdf --check verification
+    if (qpdfCmd) {
+      const qpdfCheck = execSync(`${qpdfCmd} --check "${tmpPath}"`, { encoding: 'utf8' });
+      assert(!/fatal error/i.test(qpdfCheck) || /No syntax or stream encoding errors found/i.test(qpdfCheck), `${label}: qpdf --check failed: ${qpdfCheck}`);
+    }
+
+    // 4. pdfium open-ability check (via python pypdfium2 using spawnSync)
+    const { spawnSync } = require('child_process');
+    const pyScript = `import pypdfium2 as pdfium, sys\ndoc = pdfium.PdfDocument(r"${tmpPath}")\nassert len(doc) > 0\nsys.exit(0)\n`;
+    const res = spawnSync('python', ['-c', pyScript]);
+    if (res.status !== 0) {
+      assert.fail(`${label}: pypdfium2 failed to open PDF: ${res.stderr ? res.stderr.toString() : 'status ' + res.status}`);
+    }
+  } finally {
+    if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+  }
+}
 
 let passedTests = 0;
 let failedTests = 0;
@@ -172,6 +223,7 @@ async function runAsyncTest(name, fn) {
     const header = Buffer.from(pdfBytes.slice(0, 5)).toString();
     assert.strictEqual(header, '%PDF-', 'Must start with PDF signature');
     assert(pdfBytes.length > 500, 'PDF size must be substantial');
+    await verifyPdfWithReaders(pdfBytes, 'wordToPDF');
   });
 
   await runAsyncTest('wordToPDF throws error on empty or null input', async () => {
@@ -192,6 +244,7 @@ async function runAsyncTest(name, fn) {
     assert(pdfBytes instanceof Uint8Array);
     const header = Buffer.from(pdfBytes.slice(0, 5)).toString();
     assert.strictEqual(header, '%PDF-');
+    await verifyPdfWithReaders(pdfBytes, 'excelToPDF');
   });
 
   // --- 3. powerpointToPDF ---
@@ -202,6 +255,7 @@ async function runAsyncTest(name, fn) {
     assert(pdfBytes instanceof Uint8Array);
     const header = Buffer.from(pdfBytes.slice(0, 5)).toString();
     assert.strictEqual(header, '%PDF-');
+    await verifyPdfWithReaders(pdfBytes, 'powerpointToPDF');
   });
 
   // --- 4. htmlToPDF ---
@@ -224,6 +278,7 @@ async function runAsyncTest(name, fn) {
     assert(pdfBytes instanceof Uint8Array);
     const header = Buffer.from(pdfBytes.slice(0, 5)).toString();
     assert.strictEqual(header, '%PDF-');
+    await verifyPdfWithReaders(pdfBytes, 'htmlToPDF');
   });
 
   // --- 5. pdfToWord ---
@@ -276,6 +331,7 @@ async function runAsyncTest(name, fn) {
     assert(pdfString.includes('pdfaid:part>1</pdfaid:part') || pdfString.includes('pdfaid:part'), 'Must declare pdfaid:part 1');
     assert(pdfString.includes('pdfaid:conformance>B</pdfaid:conformance') || pdfString.includes('pdfaid:conformance'), 'Must declare conformance B');
     assert(pdfString.includes('OutputIntents') || pdfString.includes('GTS_PDFA1'), 'Must include OutputIntents catalog entry');
+    await verifyPdfWithReaders(pdfaBytes, 'pdfToPdfA');
   });
 
   // --- 9. Detached Buffer & Zero Network Egress Invariant ---

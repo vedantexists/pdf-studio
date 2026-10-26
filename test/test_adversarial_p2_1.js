@@ -9,7 +9,21 @@
  * 5. Compare PDF Memory Optimization & Canvas Zeroing Lifecycle
  */
 
-const assert = require('assert');
+let assertionCount = 0;
+const _rawAssert = require('assert');
+function assert(...args) {
+  assertionCount++;
+  return _rawAssert(...args);
+}
+Object.assign(assert, _rawAssert);
+for (const fn of ['strictEqual', 'notStrictEqual', 'deepStrictEqual', 'notDeepStrictEqual', 'ok', 'rejects', 'throws', 'doesNotReject', 'doesNotThrow']) {
+  if (typeof _rawAssert[fn] === 'function') {
+    assert[fn] = function (...args) {
+      assertionCount++;
+      return _rawAssert[fn].apply(_rawAssert, args);
+    };
+  }
+}
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
@@ -530,7 +544,7 @@ async function run() {
   // Summary
   // ==========================================================================
   console.log('\n================================================================');
-  console.log(`Challenger P2-1 Adversarial Results: ${passCount} Passed | ${failCount} Failed`);
+  console.log(`Challenger P2-1 Adversarial Results: ${passCount} Passed | ${failCount} Failed | Assertions: ${assertionCount}`);
   console.log('================================================================\n');
 
   if (failCount > 0) {

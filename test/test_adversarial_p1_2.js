@@ -8,7 +8,22 @@
  * 4. Modern PDF 1.5+ XRef Repair Guard & Repair Idempotence under Adversarial Noise
  */
 
-const assert = require('assert');
+let assertionCount = 0;
+const _rawAssert = require('assert');
+function assert(...args) {
+  assertionCount++;
+  return _rawAssert(...args);
+}
+Object.assign(assert, _rawAssert);
+for (const fn of ['strictEqual', 'notStrictEqual', 'deepStrictEqual', 'notDeepStrictEqual', 'ok', 'rejects', 'throws', 'doesNotReject', 'doesNotThrow']) {
+  if (typeof _rawAssert[fn] === 'function') {
+    assert[fn] = function (...args) {
+      assertionCount++;
+      return _rawAssert[fn].apply(_rawAssert, args);
+    };
+  }
+}
+
 const zlib = require('zlib');
 const PDFLib = require('pdf-lib');
 const { PDFDocument, PDFName, PDFRawStream, PDFRef } = PDFLib;
@@ -736,7 +751,7 @@ async function runAdversarialSuite() {
   // =========================================================================
   console.log('\n======================================================');
   console.log(`Challenger P1-2 Adversarial Results:`);
-  console.log(`Passed: ${passCount} | Failed: ${failCount}`);
+  console.log(`Passed: ${passCount} | Failed: ${failCount} | Assertions: ${assertionCount}`);
   console.log('======================================================\n');
 
   if (failCount > 0) {
