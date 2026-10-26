@@ -5,7 +5,7 @@
 [![Live Demo](https://img.shields.io/badge/demo-online-brightgreen.svg)](https://vedantexists.github.io/pdf-studio/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Privacy: 100% Local](https://img.shields.io/badge/privacy-100%25%20local-emerald.svg)](#-100-in-browser-privacy)
-[![Tests: 471 Passing](https://img.shields.io/badge/tests-471%20passing-brightgreen.svg)](#-automated-verification-suite)
+[![Tests: 132+ Passing](https://img.shields.io/badge/tests-132%2B%20passing-brightgreen.svg)](#-automated-verification-suite)
 [![Audit Remediation: Verified](https://img.shields.io/badge/audit-remediated%20%26%20verified-blueviolet.svg)](#-audit-remediation--hardening-architecture)
 
 🌐 **Live Studio**: [https://vedantexists.github.io/pdf-studio/](https://vedantexists.github.io/pdf-studio/)
