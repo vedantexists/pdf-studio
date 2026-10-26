@@ -4070,8 +4070,8 @@
   }
 
   /**
-   * Convert standard PDF to ISO 19005-1 (PDF/A-1b) compliant document.
-   * Embeds XMP metadata packet and sRGB OutputIntents dictionary.
+   * PDF/A metadata injection (PDF/A metadata only, not validated, not conformant).
+   * Appends XMP metadata packet and sRGB OutputIntents dictionary.
    * @param {Uint8Array|ArrayBuffer} pdfBytes
    * @param {Object} [options={}]
    * @returns {Promise<Uint8Array>}
@@ -4094,7 +4094,7 @@
       `      <dc:format>application/pdf</dc:format>\n` +
       `    </rdf:Description>\n` +
       `    <rdf:Description rdf:about="" xmlns:pdf="http://ns.adobe.com/pdf/1.3/">\n` +
-      `      <pdf:Producer>PDF Studio (ISO 19005-1 PDF/A-1b Engine)</pdf:Producer>\n` +
+      `      <pdf:Producer>PDF Studio (PDF/A metadata only, not validated, not conformant)</pdf:Producer>\n` +
       `    </rdf:Description>\n` +
       `  </rdf:RDF>\n` +
       `</x:xmpmeta>\n` +

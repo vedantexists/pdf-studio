@@ -225,8 +225,8 @@
               <button type="button" class="nav-tool-link" role="menuitem" data-tool="pdf-to-pdfa">
                 <span class="nav-tool-icon">🏛️</span>
                 <span class="nav-tool-info">
-                  <span class="nav-tool-title">PDF to PDF/A (Beta)</span>
-                  <span class="nav-tool-desc">Appends PDF/A-1b metadata & sRGB intent</span>
+                  <span class="nav-tool-title">PDF/A Metadata (Beta)</span>
+                  <span class="nav-tool-desc">Appends PDF/A metadata only (not conformant)</span>
                 </span>
               </button>
               <button type="button" class="nav-tool-link" role="menuitem" data-tool="pdf-to-text">
@@ -446,7 +446,7 @@
           <button type="button" class="drawer-tool-link" data-tool="pdf-to-word">PDF to Word</button>
           <button type="button" class="drawer-tool-link" data-tool="pdf-to-powerpoint">PDF to PowerPoint</button>
           <button type="button" class="drawer-tool-link" data-tool="pdf-to-excel">PDF to Excel</button>
-          <button type="button" class="drawer-tool-link" data-tool="pdf-to-pdfa">PDF to PDF/A</button>
+          <button type="button" class="drawer-tool-link" data-tool="pdf-to-pdfa">PDF/A Metadata</button>
           <button type="button" class="drawer-tool-link" data-tool="pdf-to-text">PDF to Text</button>
         </div>
       </div>
@@ -726,10 +726,10 @@
         </div>
 
         <!-- PDF to PDF/A -->
-        <div class="tool-card" tabindex="0" role="button" data-tool="pdf-to-pdfa" aria-label="PDF to PDF/A tool">
+        <div class="tool-card" tabindex="0" role="button" data-tool="pdf-to-pdfa" aria-label="PDF/A Metadata tool">
           <div class="tool-icon">🏛️</div>
-          <h2>PDF to PDF/A (Beta)</h2>
-          <p>Appends ISO 19005-1 (PDF/A-1b) archival metadata, schema, and sRGB OutputIntents for document archiving.</p>
+          <h2>PDF/A Metadata (Beta)</h2>
+          <p>PDF/A metadata only (not validated, not conformant). Appends XMP metadata and sRGB OutputIntents.</p>
         </div>
 
         <!-- AI Summarizer -->

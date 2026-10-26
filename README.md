@@ -46,7 +46,7 @@
 - **PDF to Word (Beta)**: Basic client-side extraction of PDF text and layout into editable Microsoft Word (`.docx`) files.
 - **PDF to PowerPoint (Beta)**: Basic client-side extraction of PDF pages and text content into Microsoft PowerPoint (`.pptx`) presentation slides.
 - **PDF to Excel (Beta)**: Basic client-side extraction of tabular text from PDF into Microsoft Excel (`.xlsx`) spreadsheets.
-- **PDF to PDF/A (Beta)**: Appends ISO 19005-1 (PDF/A-1b) archival metadata, schema, and sRGB OutputIntents for archival workflows *(see Archival Details below)*.
+- **PDF/A Metadata (Beta)**: PDF/A metadata only (not validated, not conformant). Appends XMP metadata schema (pdfaid) and sRGB OutputIntents without font subsetting or veraPDF ISO conformance validation *(see Archival Details below)*.
 - **PDF to Text / Markdown**: Extract structured text, paragraphs, and headings from PDFs into clean Markdown or TXT.
 
 ### 5. Edit PDF
@@ -102,7 +102,7 @@ All processing happens entirely in client memory using WebAssembly and pure Java
 
 ### 4. Office Conversions & PDF/A Conformance Disclosures
 - **Office Conversions (Beta)**: Built on pure client-side OpenXML ZIP parsers (`docx`, `pptx`, `xlsx`) designed for text, paragraphs, and table extraction without sending documents to third-party conversion servers. Complex desktop typography, macro scripting, and advanced floating shapes may render in simplified layouts compared to full native Microsoft Office or LibreOffice rendering.
-- **PDF to PDF/A (Beta)**: Injects the standard ISO 19005-1 (PDF/A-1b) catalog dictionary, XMP metadata schema, and standard sRGB OutputIntents dictionary for long-term archiving workflows. Full VeraPDF validation on pre-existing third-party PDFs with non-embedded proprietary system fonts may require font subset embedding.
+- **PDF/A Metadata (Beta)**: PDF/A metadata only (not validated, not conformant). Injects the XMP metadata schema (pdfaid) and sRGB OutputIntents dictionary. It does not validate against ISO 19005-1, does not embed missing fonts, and does not claim or guarantee ISO conformance under validators such as veraPDF.
 
 ---
 

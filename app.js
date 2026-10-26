@@ -364,14 +364,14 @@ document.addEventListener('DOMContentLoaded', () => {
       description: 'Basic client-side extraction of tabular text from PDF into Microsoft Excel (.xlsx) spreadsheets.',
     },
     'pdf-to-pdfa': {
-      title: 'PDF to PDF/A (Beta)',
+      title: 'PDF/A Metadata (Beta)',
       icon: '🏛️',
-      actionText: 'Convert to PDF/A',
+      actionText: 'Append PDF/A Metadata',
       accept: '.pdf,application/pdf',
       acceptImages: false,
       maxFiles: 1,
       multiple: false,
-      description: 'Appends PDF/A-1b archival metadata, schema, and sRGB OutputIntents for archival workflows.',
+      description: 'PDF/A metadata only (not validated, not conformant). Appends XMP metadata and sRGB OutputIntents.',
     },
     'pdf-to-text': {
       title: 'PDF to Text',
@@ -3107,9 +3107,9 @@ document.addEventListener('DOMContentLoaded', () => {
       toolSettings.innerHTML = `
         <div class="setting-group">
           <label>PDF/A Archival Profile</label>
-          <div style="font-size: 0.85rem; background: #f8fafc; padding: 0.6rem; border-radius: var(--radius-sm); border: 1px solid var(--border);">
-            <strong>ISO 19005-1 (PDF/A-1b)</strong><br>
-            <span class="setting-hint">Injects XMP metadata packet and sRGB OutputIntents for long-term document preservation.</span>
+          <div style="font-size: 0.85rem; background: #fffbeb; padding: 0.6rem; border-radius: var(--radius-sm); border: 1px solid #fef3c7; color: #92400e; line-height: 1.4;">
+            <strong>PDF/A metadata only (not validated, not conformant)</strong><br>
+            <span class="setting-hint" style="color: #92400e;">Appends XMP metadata schema (pdfaid) and sRGB OutputIntents dictionary. Does not embed missing fonts or guarantee ISO 19005-1 conformance.</span>
           </div>
         </div>
       `;
@@ -3700,10 +3700,10 @@ document.addEventListener('DOMContentLoaded', () => {
       } else if (currentTool === 'pdf-to-pdfa') {
         if (uploadedFiles.length === 0) throw new Error('Please select a PDF document to convert.');
         const srcBytes = uploadedFiles[0].bytes.slice();
-        showStatus('Injecting ISO 19005-1 compliance metadata and color profiles...', 'processing');
+        showStatus('Appending PDF/A metadata packet and color profile intent...', 'processing');
         const pdfaBytes = await PDFCore.pdfToPdfA(srcBytes);
         downloadFile(pdfaBytes, 'archived_document_pdfa.pdf', 'application/pdf');
-        showSuccess('Document converted to ISO-standardized PDF/A-1b!');
+        showSuccess('PDF/A metadata appended (not validated, not conformant)!');
       } else if (currentTool === 'ai-summarizer' || currentTool === 'summarizer') {
         if (uploadedFiles.length === 0) throw new Error('Please select a PDF document to summarize.');
         const srcBytes = uploadedFiles[0].bytes.slice();
