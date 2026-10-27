@@ -57,7 +57,34 @@ if (typeof document !== 'undefined') {
   const toolSettings = document.getElementById('toolSettings');
   const executeBtn = document.getElementById('executeBtn');
   const executeBtnText = document.getElementById('executeBtnText');
+  const cancelProcessBtn = document.getElementById('cancelProcessBtn');
   const statusBanner = document.getElementById('statusBanner');
+
+  const jobRunner = (typeof JobRunner !== 'undefined') ? new JobRunner({
+    onProgress(percent, stage) {
+      showStatus(`Processing... ${percent}% (${stage})`, 'processing');
+    },
+    onError(err) {
+      showStatus(err.userMessage || err.message || 'Operation failed.', 'error');
+    }
+  }) : null;
+
+  if (cancelProcessBtn) {
+    cancelProcessBtn.addEventListener('click', () => {
+      if (jobRunner) {
+        jobRunner.cancel();
+      }
+    });
+  }
+
+  async function executeCoreOp(op, args) {
+    if (jobRunner) {
+      return await jobRunner.start({ operation: op, args });
+    }
+    const fn = PDFCore && PDFCore[op];
+    if (!fn) throw new Error(`Operation ${op} not found`);
+    return await fn(...args);
+  }
 
   // App State
   let currentTool = null;
@@ -3193,7 +3220,7 @@ if (typeof document !== 'undefined') {
         }
       });
 
-      const resultBytes = await PDFCore.fillForm(srcBytes, fieldValues, flatten);
+      const resultBytes = await executeCoreOp('fillForm', [srcBytes, fieldValues, flatten]);
       const outFilename = flatten ? 'flattened_form.pdf' : 'filled_form.pdf';
       downloadFile(resultBytes, outFilename, 'application/pdf');
       showSuccess(flatten ? 'Form successfully flattened and saved!' : 'Interactive form saved successfully!');
@@ -3216,6 +3243,7 @@ if (typeof document !== 'undefined') {
 
     isProcessing = true;
     executeBtn.disabled = true;
+    if (cancelProcessBtn) cancelProcessBtn.style.display = 'block';
     showStatus('Processing your document...', 'processing');
 
     try {
@@ -3224,7 +3252,7 @@ if (typeof document !== 'undefined') {
           throw new Error('Please add at least 2 PDF files to merge.');
         }
         const bytesList = uploadedFiles.map((f) => f.bytes.slice());
-        const mergedBytes = await PDFCore.mergePDFs(bytesList);
+        const mergedBytes = await executeCoreOp('mergePDFs', [bytesList]);
         downloadFile(mergedBytes, 'merged.pdf', 'application/pdf');
         showSuccess('Your PDFs have been successfully merged!');
       } else if (currentTool === 'split') {
@@ -3232,7 +3260,7 @@ if (typeof document !== 'undefined') {
         const srcBytes = uploadedFiles[0].bytes.slice();
 
         if (mode === 'all') {
-          const splitResults = await PDFCore.splitPDF(srcBytes);
+          const splitResults = await executeCoreOp('splitPDF', [srcBytes]);
           if (!window.JSZip) throw new Error('ZIP library not loaded.');
           const zip = new window.JSZip();
           splitResults.forEach((item) => {
@@ -3247,7 +3275,7 @@ if (typeof document !== 'undefined') {
           const indices = PDFCore.parsePageRanges(rangeStr, totalPages);
           if (indices.length === 0) throw new Error('No valid pages found in the specified range.');
           
-          const extractedBytes = await PDFCore.extractPages(srcBytes, indices);
+          const extractedBytes = await executeCoreOp('extractPages', [srcBytes, indices]);
           downloadFile(extractedBytes, 'extracted.pdf', 'application/pdf');
           showSuccess(`Extracted ${indices.length} pages into extracted.pdf!`);
         }
@@ -3264,7 +3292,7 @@ if (typeof document !== 'undefined') {
           throw new Error('At least one page must be included (cannot delete all pages).');
         }
 
-        const organizedBytes = await PDFCore.organizePDF(srcBytes, validPages);
+        const organizedBytes = await executeCoreOp('organizePDF', [srcBytes, validPages]);
         downloadFile(organizedBytes, 'organized.pdf', 'application/pdf');
         showSuccess(`Saved organized PDF with ${validPages.length} page(s)!`);
       } else if (currentTool === 'rotate') {
@@ -3275,13 +3303,13 @@ if (typeof document !== 'undefined') {
 
         if (isUniform && firstRot !== 0) {
           // In-place rotation preserves document bookmarks, outlines, and form fields
-          rotatedBytes = await PDFCore.rotatePDF(srcBytes, firstRot);
+          rotatedBytes = await executeCoreOp('rotatePDF', [srcBytes, firstRot]);
         } else {
           const pagesConfig = activePages.map((p) => ({
             sourceIndex: p.pageNum - 1,
             rotation: p.rotation,
           }));
-          rotatedBytes = await PDFCore.organizePDF(srcBytes, pagesConfig);
+          rotatedBytes = await executeCoreOp('organizePDF', [srcBytes, pagesConfig]);
         }
         downloadFile(rotatedBytes, 'rotated.pdf', 'application/pdf');
         showSuccess('Your PDF pages have been rotated!');
@@ -3367,7 +3395,7 @@ if (typeof document !== 'undefined') {
           imageItems.push({ bytes, type });
         }
 
-        const pdfBytes = await PDFCore.imagesToPDF(imageItems, { margin, pageSize });
+        const pdfBytes = await executeCoreOp('imagesToPDF', [imageItems, { margin, pageSize }]);
         downloadFile(pdfBytes, 'converted_images.pdf', 'application/pdf');
         showSuccess(`Converted ${imageItems.length} images into PDF!`);
       } else if (currentTool === 'watermark') {
@@ -3383,13 +3411,13 @@ if (typeof document !== 'undefined') {
         const g = ((hexNum >> 8) & 255) / 255;
         const b = (hexNum & 255) / 255;
 
-        const watermarkedBytes = await PDFCore.watermarkPDF(srcBytes, {
+        const watermarkedBytes = await executeCoreOp('watermarkPDF', [srcBytes, {
           text,
           opacity,
           fontSize,
           angle,
           r, g, b,
-        });
+        }]);
         downloadFile(watermarkedBytes, 'watermarked.pdf', 'application/pdf');
         showSuccess('Watermark applied successfully!');
       } else if (currentTool === 'page-numbers') {
@@ -3399,12 +3427,12 @@ if (typeof document !== 'undefined') {
         const startNumber = parseInt(document.getElementById('pnStartNumberInput').value, 10) || 1;
         const skipCount = document.getElementById('pnSkipCoverInput').checked ? 1 : 0;
 
-        const numberedBytes = await PDFCore.addPageNumbers(srcBytes, {
+        const numberedBytes = await executeCoreOp('addPageNumbers', [srcBytes, {
           position,
           format,
           startNumber,
           skipCount,
-        });
+        }]);
         downloadFile(numberedBytes, 'numbered.pdf', 'application/pdf');
         showSuccess('Page numbers added successfully!');
       } else if (currentTool === 'extract-pages') {
@@ -3422,7 +3450,7 @@ if (typeof document !== 'undefined') {
         if (indices.length === 0) {
           throw new Error('Please select at least one page to extract.');
         }
-        const extractedBytes = await PDFCore.extractPages(srcBytes, indices);
+        const extractedBytes = await executeCoreOp('extractPages', [srcBytes, indices]);
         downloadFile(extractedBytes, 'extracted.pdf', 'application/pdf');
         showSuccess(`Extracted ${indices.length} pages into extracted.pdf!`);
       } else if (currentTool === 'remove-pages') {
@@ -3441,7 +3469,7 @@ if (typeof document !== 'undefined') {
         if (indicesToRemove.length >= total) {
           throw new Error('Cannot remove all pages: at least one page must remain in the document.');
         }
-        const resultBytes = await PDFCore.removePages(srcBytes, indicesToRemove);
+        const resultBytes = await executeCoreOp('removePages', [srcBytes, indicesToRemove]);
         downloadFile(resultBytes, 'removed_pages.pdf', 'application/pdf');
         showSuccess(`Removed ${indicesToRemove.length} page(s) successfully!`);
       } else if (currentTool === 'protect' || currentTool === 'protect-pdf') {
@@ -3460,13 +3488,13 @@ if (typeof document !== 'undefined') {
           modifying: document.getElementById('protectPermModifying')?.checked ?? true,
           annotating: document.getElementById('protectPermAnnotating')?.checked ?? true,
         };
-        const protectedBytes = await PDFCore.protectPDF(srcBytes, pass, null, permissions);
+        const protectedBytes = await executeCoreOp('protectPDF', [srcBytes, pass, null, permissions]);
         downloadFile(protectedBytes, 'protected.pdf', 'application/pdf');
         showSuccess('Your PDF has been encrypted with password protection!');
       } else if (currentTool === 'unlock' || currentTool === 'unlock-pdf') {
         const srcBytes = uploadedFiles[0].bytes.slice();
         const pass = (document.getElementById('unlockPasswordInput')?.value || '').trim();
-        const unlockedBytes = await PDFCore.unlockPDF(srcBytes, pass);
+        const unlockedBytes = await executeCoreOp('unlockPDF', [srcBytes, pass]);
         downloadFile(unlockedBytes, 'unlocked.pdf', 'application/pdf');
         showSuccess('Your PDF has been unlocked and decrypted successfully!');
       } else if (currentTool === 'sign' || currentTool === 'sign-pdf') {
@@ -3490,12 +3518,12 @@ if (typeof document !== 'undefined') {
         const pdfWidth = Math.round(sigOverlayPos.width * scaleX);
         const pdfHeight = Math.round(sigOverlayPos.height * scaleY);
 
-        const signedBytes = await PDFCore.signPDF(srcBytes, currentSignatureDataUrl, signCurrentPageIndex, {
+        const signedBytes = await executeCoreOp('signPDF', [srcBytes, currentSignatureDataUrl, signCurrentPageIndex, {
           x: pdfX,
           y: pdfY,
           width: pdfWidth,
           height: pdfHeight,
-        });
+        }]);
         downloadFile(signedBytes, 'signed.pdf', 'application/pdf');
         showSuccess('Signature baked into PDF successfully!');
       } else if (currentTool === 'crop' || currentTool === 'crop-pdf') {
@@ -3528,7 +3556,7 @@ if (typeof document !== 'undefined') {
           cropBoxes = { x: pdfX, y: pdfY, width: pdfWidth, height: pdfHeight };
         }
 
-        const croppedBytes = await PDFCore.cropPDF(srcBytes, cropBoxes);
+        const croppedBytes = await executeCoreOp('cropPDF', [srcBytes, cropBoxes]);
         downloadFile(croppedBytes, 'cropped.pdf', 'application/pdf');
         showSuccess('Your PDF has been successfully cropped!');
       } else if (currentTool === 'forms' || currentTool === 'pdf-forms') {
@@ -3537,7 +3565,9 @@ if (typeof document !== 'undefined') {
         const srcBytes = uploadedFiles[0].bytes.slice();
         const preset = document.querySelector('input[name="compressPreset"]:checked')?.value || 'recommended';
         const stripMetadata = document.getElementById('compressStripMetadata')?.checked ?? true;
-        const compressedBytes = await PDFCore.compressPDF(srcBytes, { level: preset, stripMetadata });
+        const compressedBytes = jobRunner
+          ? await executeCoreOp('compressPDF', [srcBytes, { level: preset, stripMetadata }])
+          : await PDFCore.compressPDF(srcBytes, { level: preset, stripMetadata });
         const oldSize = srcBytes.length;
         const newSize = compressedBytes.length;
         const ratio = oldSize > 0 ? Math.round(((oldSize - newSize) / oldSize) * 100) : 0;
@@ -3545,7 +3575,7 @@ if (typeof document !== 'undefined') {
         showSuccess(`Compressed from ${(oldSize / 1024).toFixed(1)} KB to ${(newSize / 1024).toFixed(1)} KB (${ratio >= 0 ? '-' + ratio + '%' : '+0%'})!`);
       } else if (currentTool === 'repair' || currentTool === 'repair-pdf') {
         const srcBytes = uploadedFiles[0].bytes.slice();
-        const repairedBytes = await PDFCore.repairPDF(srcBytes);
+        const repairedBytes = await executeCoreOp('repairPDF', [srcBytes]);
         downloadFile(repairedBytes, 'repaired.pdf', 'application/pdf');
         showSuccess('PDF repaired and cross-reference tables reconstructed successfully!');
       } else if (currentTool === 'redact' || currentTool === 'redact-pdf') {
@@ -3556,14 +3586,14 @@ if (typeof document !== 'undefined') {
         const y = parseFloat(document.getElementById('redactY')?.value || '450');
         const width = parseFloat(document.getElementById('redactW')?.value || '250');
         const height = parseFloat(document.getElementById('redactH')?.value || '30');
-        const redactedBytes = await PDFCore.redactPDF(srcBytes, [{
+        const redactedBytes = await executeCoreOp('redactPDF', [srcBytes, [{
           pageIndex: pageIdx,
           x,
           y,
           width,
           height,
           label: label || undefined,
-        }]);
+        }]]);
         downloadFile(redactedBytes, 'redacted.pdf', 'application/pdf');
         showSuccess('Document text purged and redacted successfully!');
       } else if (currentTool === 'compare' || currentTool === 'compare-pdf') {
@@ -3619,7 +3649,7 @@ if (typeof document !== 'undefined') {
           bytes: f.bytes,
           type: (f.file && f.file.type && f.file.type.includes('png')) ? 'png' : 'jpeg',
         }));
-        const pdfBytes = await PDFCore.imagesToPDF(imgList, { pageSize: 'a4', margin: 20 });
+        const pdfBytes = await executeCoreOp('imagesToPDF', [imgList, { pageSize: 'a4', margin: 20 }]);
         downloadFile(pdfBytes, 'scanned_document.pdf', 'application/pdf');
         showSuccess(`Compiled ${imgList.length} scanned page(s) into PDF!`);
       } else if (currentTool === 'text-to-pdf' || currentTool === 'txt-to-pdf') {
@@ -3633,13 +3663,13 @@ if (typeof document !== 'undefined') {
         if (!textContent.trim()) throw new Error('Please enter text or upload a text file to convert.');
         const fontSize = parseInt(document.getElementById('textToPdfFontSize')?.value || document.getElementById('txtFontSize')?.value || '12', 10);
         const margin = parseInt(document.getElementById('textToPdfMargin')?.value || document.getElementById('txtMargin')?.value || '50', 10);
-        const pdfBytes = await PDFCore.textToPDF(textContent, { fontSize, margin });
+        const pdfBytes = await executeCoreOp('textToPDF', [textContent, { fontSize, margin }]);
         downloadFile(pdfBytes, 'converted_text.pdf', 'application/pdf');
         showSuccess('Text document successfully converted to PDF!');
       } else if (currentTool === 'pdf-to-text' || currentTool === 'pdf-to-txt') {
         const srcBytes = uploadedFiles[0].bytes.slice();
         const format = document.getElementById('pdfToTextFormat')?.value || document.getElementById('txtOutputFormat')?.value || 'markdown';
-        const extractedText = await PDFCore.pdfToText(srcBytes, { format });
+        const extractedText = await executeCoreOp('pdfToText', [srcBytes, { format }]);
         const ext = format === 'markdown' ? 'md' : 'txt';
         const mime = format === 'markdown' ? 'text/markdown;charset=utf-8' : 'text/plain;charset=utf-8';
         const blob = new Blob([extractedText], { type: mime });
@@ -3651,7 +3681,7 @@ if (typeof document !== 'undefined') {
         }
         const srcBytes = uploadedFiles[0].bytes.slice();
         showStatus('Applying edits and baking annotations into PDF...', 'processing');
-        const pdfBytes = await PDFCore.editPDF(srcBytes, editAnnotationsByPage);
+        const pdfBytes = await executeCoreOp('editPDF', [srcBytes, editAnnotationsByPage]);
         downloadFile(pdfBytes, 'edited_document.pdf', 'application/pdf');
         showSuccess('Annotations successfully applied and PDF saved!');
       } else if (currentTool === 'ocr-pdf' || currentTool === 'ocr') {
@@ -3664,70 +3694,70 @@ if (typeof document !== 'undefined') {
         const srcBytes = uploadedFiles[0].bytes.slice();
         const lang = document.getElementById('ocrLangSelect')?.value || 'eng';
         showStatus(`Running client-side OCR recognition (${lang})...`, 'processing');
-        const pdfBytes = await PDFCore.ocrPDF(srcBytes, { lang });
+        const pdfBytes = await executeCoreOp('ocrPDF', [srcBytes, { lang }]);
         downloadFile(pdfBytes, 'searchable_ocr_document.pdf', 'application/pdf');
         showSuccess('Searchable PDF generated with embedded text layer!');
       } else if (currentTool === 'word-to-pdf') {
         if (uploadedFiles.length === 0) throw new Error('Please select a Word document (.docx) to convert.');
         const srcBytes = uploadedFiles[0].bytes.slice();
         showStatus('Converting Word document to PDF...', 'processing');
-        const pdfBytes = await PDFCore.wordToPDF(srcBytes);
+        const pdfBytes = await executeCoreOp('wordToPDF', [srcBytes]);
         downloadFile(pdfBytes, 'converted_word.pdf', 'application/pdf');
         showSuccess('Word document successfully converted to PDF!');
       } else if (currentTool === 'excel-to-pdf') {
         if (uploadedFiles.length === 0) throw new Error('Please select an Excel workbook (.xlsx) to convert.');
         const srcBytes = uploadedFiles[0].bytes.slice();
         showStatus('Converting spreadsheet to PDF...', 'processing');
-        const pdfBytes = await PDFCore.excelToPDF(srcBytes);
+        const pdfBytes = await executeCoreOp('excelToPDF', [srcBytes]);
         downloadFile(pdfBytes, 'converted_spreadsheet.pdf', 'application/pdf');
         showSuccess('Excel spreadsheet successfully converted to PDF!');
       } else if (currentTool === 'powerpoint-to-pdf') {
         if (uploadedFiles.length === 0) throw new Error('Please select a PowerPoint presentation (.pptx) to convert.');
         const srcBytes = uploadedFiles[0].bytes.slice();
         showStatus('Converting presentation to PDF...', 'processing');
-        const pdfBytes = await PDFCore.powerpointToPDF(srcBytes);
+        const pdfBytes = await executeCoreOp('powerpointToPDF', [srcBytes]);
         downloadFile(pdfBytes, 'converted_presentation.pdf', 'application/pdf');
         showSuccess('PowerPoint presentation successfully converted to PDF!');
       } else if (currentTool === 'html-to-pdf') {
         if (uploadedFiles.length === 0) throw new Error('Please select an HTML file to convert.');
         const srcBytes = uploadedFiles[0].bytes.slice();
         showStatus('Rendering HTML to PDF...', 'processing');
-        const pdfBytes = await PDFCore.htmlToPDF(srcBytes);
+        const pdfBytes = await executeCoreOp('htmlToPDF', [srcBytes]);
         downloadFile(pdfBytes, 'converted_webpage.pdf', 'application/pdf');
         showSuccess('HTML document successfully converted to PDF!');
       } else if (currentTool === 'pdf-to-word') {
         if (uploadedFiles.length === 0) throw new Error('Please select a PDF document to convert.');
         const srcBytes = uploadedFiles[0].bytes.slice();
         showStatus('Extracting content and formatting Word document (.docx)...', 'processing');
-        const docxBytes = await PDFCore.pdfToWord(srcBytes);
+        const docxBytes = await executeCoreOp('pdfToWord', [srcBytes]);
         downloadBlob(new Blob([docxBytes], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }), 'converted_document.docx');
         showSuccess('PDF successfully converted to editable Word (.docx)!');
       } else if (currentTool === 'pdf-to-excel') {
         if (uploadedFiles.length === 0) throw new Error('Please select a PDF document to convert.');
         const srcBytes = uploadedFiles[0].bytes.slice();
         showStatus('Extracting tabular data and building Excel workbook (.xlsx)...', 'processing');
-        const xlsxBytes = await PDFCore.pdfToExcel(srcBytes);
+        const xlsxBytes = await executeCoreOp('pdfToExcel', [srcBytes]);
         downloadBlob(new Blob([xlsxBytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), 'converted_data.xlsx');
         showSuccess('PDF data successfully converted to Excel (.xlsx)!');
       } else if (currentTool === 'pdf-to-powerpoint') {
         if (uploadedFiles.length === 0) throw new Error('Please select a PDF document to convert.');
         const srcBytes = uploadedFiles[0].bytes.slice();
         showStatus('Generating PowerPoint slides (.pptx)...', 'processing');
-        const pptxBytes = await PDFCore.pdfToPowerPoint(srcBytes);
+        const pptxBytes = await executeCoreOp('pdfToPowerPoint', [srcBytes]);
         downloadBlob(new Blob([pptxBytes], { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' }), 'converted_presentation.pptx');
         showSuccess('PDF successfully converted to PowerPoint (.pptx)!');
       } else if (currentTool === 'pdf-to-pdfa') {
         if (uploadedFiles.length === 0) throw new Error('Please select a PDF document to convert.');
         const srcBytes = uploadedFiles[0].bytes.slice();
         showStatus('Appending PDF/A metadata packet and color profile intent...', 'processing');
-        const pdfaBytes = await PDFCore.pdfToPdfA(srcBytes);
+        const pdfaBytes = await executeCoreOp('pdfToPdfA', [srcBytes]);
         downloadFile(pdfaBytes, 'archived_document_pdfa.pdf', 'application/pdf');
         showSuccess('PDF/A metadata appended (not validated, not conformant)!');
       } else if (currentTool === 'ai-summarizer' || currentTool === 'summarizer') {
         if (uploadedFiles.length === 0) throw new Error('Please select a PDF document to summarize.');
         const srcBytes = uploadedFiles[0].bytes.slice();
         showStatus('Analyzing document and generating executive summary...', 'processing');
-        const summaryMd = await PDFCore.summarizePDF(srcBytes);
+        const summaryMd = await executeCoreOp('summarizePDF', [srcBytes]);
         downloadBlob(new Blob([summaryMd], { type: 'text/markdown;charset=utf-8' }), 'ai_document_summary.md');
         showSuccess('AI Summary generated successfully!');
       } else if (currentTool === 'translate-pdf' || currentTool === 'translate') {
@@ -3735,14 +3765,14 @@ if (typeof document !== 'undefined') {
         const srcBytes = uploadedFiles[0].bytes.slice();
         const targetLang = document.getElementById('translateLangSelect')?.value || 'es';
         showStatus(`Translating document glossary to ${targetLang.toUpperCase()}...`, 'processing');
-        const translatedMd = await PDFCore.translatePDF(srcBytes, { targetLang, format: 'markdown' });
+        const translatedMd = await executeCoreOp('translatePDF', [srcBytes, { targetLang, format: 'markdown' }]);
         downloadBlob(new Blob([translatedMd], { type: 'text/markdown;charset=utf-8' }), `translated_${targetLang}.md`);
         showSuccess('Document translated via local offline glossary with zero network transmission!');
       } else if (currentTool === 'pdf-to-markdown' || currentTool === 'pdf-to-md') {
         if (uploadedFiles.length === 0) throw new Error('Please select a PDF document to convert.');
         const srcBytes = uploadedFiles[0].bytes.slice();
         showStatus('Extracting markdown structure...', 'processing');
-        const markdown = await PDFCore.pdfToMarkdown(srcBytes);
+        const markdown = await executeCoreOp('pdfToMarkdown', [srcBytes]);
         downloadBlob(new Blob([markdown], { type: 'text/markdown;charset=utf-8' }), 'document.md');
         showSuccess('PDF converted to Markdown (.md) successfully!');
       }
@@ -3752,6 +3782,7 @@ if (typeof document !== 'undefined') {
     } finally {
       isProcessing = false;
       executeBtn.disabled = false;
+      if (cancelProcessBtn) cancelProcessBtn.style.display = 'none';
     }
   });
 
@@ -4051,7 +4082,7 @@ if (typeof document !== 'undefined') {
       closeModal();
       showStatus('Protecting PDF...', 'processing');
       try {
-        const res = await PDFCore.protectPDF(uploadedFiles[0].bytes.slice(), pass, null, permissions);
+        const res = await executeCoreOp('protectPDF', [uploadedFiles[0].bytes.slice(), pass, null, permissions]);
         downloadFile(res, 'protected.pdf', 'application/pdf');
         showSuccess('PDF protected successfully!');
       } catch (err) {

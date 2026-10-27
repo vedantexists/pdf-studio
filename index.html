@@ -804,6 +804,9 @@
             <button type="button" id="executeBtn" class="primary-btn" style="width: 100%; justify-content: center; margin-top: 1rem;">
               <span id="executeBtnText">Process PDF</span>
             </button>
+            <button type="button" id="cancelProcessBtn" class="secondary-btn" style="width: 100%; justify-content: center; margin-top: 0.5rem; display: none;">
+              <span>Cancel Operation</span>
+            </button>
 
             <!-- Status Banner -->
             <div id="statusBanner" class="status-banner" role="status"></div>
@@ -1002,6 +1005,7 @@
 
   <script src="vendor/pdf-lib-encrypt.js"></script>
   <script src="pdf_core.js"></script>
+  <script src="job_runner.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
