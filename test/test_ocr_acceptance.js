@@ -1,7 +1,8 @@
-const { spawn, spawnSync, execSync } = require('child_process');
+const { spawnSync, execSync } = require('child_process');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { chromium } = require('playwright');
 let assertionCount = 0;
 const _rawAssert = require('assert');
 function assert(...args) {
@@ -32,15 +33,8 @@ const MIME_TYPES = {
   '.pdf': 'application/pdf',
 };
 
-const { findBrowser } = require('./helpers/browser');
-
 async function runOcrAcceptance() {
   console.log('=== Item 4 Acceptance Test: Offline OCR with Local Tesseract WASM ===');
-
-  const browserBin = findBrowser();
-  if (!browserBin) {
-    throw new Error('No supported browser or OCR engine found in environment to run OCR acceptance test. A real browser or OCR engine is required; never pass without running the engine.');
-  }
 
   // Step 1: Ensure rasterized test PDF exists
   const samplePdfPath = path.join(ROOT, 'test', 'image_only_sample.pdf');
@@ -82,30 +76,30 @@ async function runOcrAcceptance() {
 
   await new Promise(resolve => server.listen(PORT, resolve));
 
-  // Step 3: Run headless browser with cross-platform flags
-  const proc = spawn(browserBin, [
-    '--headless=new',
-    '--disable-gpu',
-    '--no-sandbox',
-    '--disable-dev-shm-usage',
-    `http://localhost:${PORT}/test/test_ocr_harness.html`
-  ]);
-  proc.on('error', err => {
-    console.warn('  [WARN] Headless browser execution notice:', err.message);
-  });
+  // Step 3: Run headless browser via Playwright
+  let browser;
+  try {
+    browser = await chromium.launch({ headless: true });
+  } catch (err) {
+    server.close();
+    throw new Error(`Failed to launch Playwright Chromium for OCR acceptance test: ${err.message}`);
+  }
+
+  const page = await browser.newPage();
+  await page.goto(`http://localhost:${PORT}/test/test_ocr_harness.html`);
 
   // Wait for file to be written
   const start = Date.now();
   while (!fs.existsSync(outPdfPath) || fs.statSync(outPdfPath).size < 1000) {
     if (Date.now() - start > 35000) {
-      try { proc.kill(); } catch {}
+      try { await browser.close(); } catch {}
       server.close();
       throw new Error('Timeout waiting for OCR output generation');
     }
     await new Promise(r => setTimeout(r, 400));
   }
 
-  try { proc.kill(); } catch {}
+  try { await browser.close(); } catch {}
   server.close();
 
   // Step 4: Verify with Python pypdf and pdfium

@@ -1,8 +1,8 @@
-const { spawn, spawnSync } = require('child_process');
+const { spawnSync } = require('child_process');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { findBrowser } = require('./helpers/browser');
+const { chromium } = require('playwright');
 
 let assertionCount = 0;
 const _rawAssert = require('assert');
@@ -34,11 +34,6 @@ const MIME_TYPES = {
 
 async function runProtectBrowserTest() {
   console.log('=== Item 5 Acceptance Test: Protect Dialog Browser Verification with QPDF ===');
-
-  const browserBin = findBrowser();
-  if (!browserBin) {
-    throw new Error('No supported browser found in environment to run Protect browser test.');
-  }
 
   const panelPdfPath = path.join(ROOT, 'test', 'browser_protected_panel.pdf');
   const modalPdfPath = path.join(ROOT, 'test', 'browser_protected_modal.pdf');
@@ -104,29 +99,34 @@ async function runProtectBrowserTest() {
 
   await new Promise(resolve => server.listen(PORT, resolve));
 
-  const proc = spawn(browserBin, [
-    '--headless=new',
-    '--disable-gpu',
-    '--no-sandbox',
-    '--disable-dev-shm-usage',
-    `http://localhost:${PORT}/`
-  ]);
+  const tmpDownloadsDir = path.join(ROOT, 'test', '.tmp_downloads');
+  if (!fs.existsSync(tmpDownloadsDir)) fs.mkdirSync(tmpDownloadsDir, { recursive: true });
 
-  proc.on('error', err => {
-    console.warn('  [WARN] Headless browser execution notice:', err.message);
-  });
+  let browser;
+  try {
+    browser = await chromium.launch({
+      headless: true,
+      downloadsPath: tmpDownloadsDir
+    });
+  } catch (err) {
+    server.close();
+    throw new Error(`Failed to launch Playwright Chromium for Protect browser test: ${err.message}`);
+  }
+
+  const page = await browser.newPage();
+  await page.goto(`http://localhost:${PORT}/`);
 
   const start = Date.now();
   while ((!fs.existsSync(panelPdfPath) || !fs.existsSync(modalPdfPath)) && !browserError) {
     if (Date.now() - start > 25000) {
-      try { proc.kill(); } catch {}
+      try { await browser.close(); } catch {}
       server.close();
       throw new Error('Timeout waiting for Protect output files from browser');
     }
     await new Promise(r => setTimeout(r, 300));
   }
 
-  try { proc.kill(); } catch {}
+  try { await browser.close(); } catch {}
   server.close();
 
   if (browserError) {
@@ -163,6 +163,7 @@ async function runProtectBrowserTest() {
 
   try { if (fs.existsSync(panelPdfPath)) fs.unlinkSync(panelPdfPath); } catch {}
   try { if (fs.existsSync(modalPdfPath)) fs.unlinkSync(modalPdfPath); } catch {}
+  try { if (fs.existsSync(tmpDownloadsDir)) fs.rmSync(tmpDownloadsDir, { recursive: true, force: true }); } catch {}
 
   console.log(`Passed: 2 | Failed: 0 | Assertions: ${assertionCount}`);
   if (assertionCount === 0) throw new Error('Zero assertions executed in test_protect_dialog_browser');

@@ -35,11 +35,8 @@ jobs:
       - name: Install Node dependencies
         run: npm install
 
-      - name: Ensure browser is available for OCR acceptance test
-        run: |
-          if ! command -v google-chrome &> /dev/null && ! command -v chromium &> /dev/null; then
-            npx playwright install chromium
-          fi
+      - name: Install Playwright browsers and dependencies for cross-browser matrix
+        run: npx playwright install --with-deps chromium firefox webkit
 
       - name: Print environment info
         run: |
@@ -49,6 +46,9 @@ jobs:
           python --version
           qpdf --version | head -n 1
           which google-chrome || echo "No google-chrome"
+
+      - name: Run cross-browser matrix test suite
+        run: npm run test:browser
 
       - name: Run full test suite
         run: npm test
