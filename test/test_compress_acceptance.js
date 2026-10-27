@@ -38,15 +38,20 @@ function runPdfiumCheck(pdfBytes, password) {
   const tmpPath = path.join(__dirname, `_tmp_pdfium_${Date.now()}_${Math.random().toString(36).slice(2)}.pdf`);
   try {
     fs.writeFileSync(tmpPath, Buffer.from(pdfBytes));
+    const safePath = tmpPath.replace(/\\/g, '/');
     const pyCode = `
 import pypdfium2 as pdfium
 pw = ${password ? JSON.stringify(password) : 'None'}
-doc = pdfium.PdfDocument(r"${tmpPath}", password=pw)
+doc = pdfium.PdfDocument("${safePath}", password=pw)
 assert len(doc) >= 0
 `;
     const res = spawnSync('python', ['-c', pyCode], { encoding: 'utf8' });
+    if (res.status !== 0) {
+      console.error('PDFium check error:', res.stderr || res.stdout);
+    }
     return res.status === 0;
-  } catch {
+  } catch (err) {
+    console.error('runPdfiumCheck exception:', err);
     return false;
   } finally {
     if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
