@@ -7,8 +7,8 @@
 | 0.2 Worker architecture | Worker Platform Engineer | VERIFIED | c986f18 | node test/test_worker_architecture.js: 7 suites, 94 assertions PASS, npm test (30 suites, 1249 assertions) PASS |
 | 0.3 Cross-browser matrix | Browser Matrix Engineer | VERIFIED | 1d6f7f0 | npm run test:browser: Chromium, Firefox, WebKit, Pixel 7 PASS (84 assertions, 0 skips) |
 | Phase 1: Core Tools at iLovePDF Quality | | | | |
-| 1.1 Compress | Engineer Compress | PENDING PHASE 0 | - | - |
-| 1.2 Hardening | Engineer Tool Hardening | PENDING PHASE 0 | - | - |
+| 1.1 Compress | Engineer Compress | VERIFIED | 74c494d | node test/test_compress_acceptance.js: 23 passed, 110 assertions PASS; npm test (31 suites, 1359 assertions) PASS |
+| 1.2 Hardening | Engineer Tool Hardening | PENDING 1.1 | - | - |
 | 1.3 OCR upgrade | Engineer OCR | PENDING PHASE 0 | - | - |
 | 1.4 Protect, unlock, redact | Engineer Security | PENDING PHASE 0 | - | - |
 | Phase 2: Quality Tiers and Optional Server | | | | |
