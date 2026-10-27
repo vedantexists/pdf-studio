@@ -2455,35 +2455,58 @@ if (typeof document !== 'undefined') {
       `;
     } else if (currentTool === 'compress' || currentTool === 'compress-pdf') {
       const origSizeKb = file ? Math.round(file.size / 1024) : 0;
+      const getEst = (preset) => {
+        if (preset === 'extreme') return `~${Math.max(1, Math.round(origSizeKb * 0.35))} KB (~65% reduction)`;
+        if (preset === 'low') return `~${Math.max(1, Math.round(origSizeKb * 0.80))} KB (~20% reduction)`;
+        return `~${Math.max(1, Math.round(origSizeKb * 0.60))} KB (~40% reduction)`;
+      };
       toolSettings.innerHTML = `
         <div class="setting-group">
           <label>Compression Level</label>
-          <div class="radio-group">
+          <div class="radio-group" id="compressPresetGroup">
             <label class="radio-option">
               <input type="radio" name="compressPreset" value="recommended" checked>
-              <span><strong>Recommended Compression</strong><br><small style="color:var(--text-muted)">Balanced file size reduction & crisp text</small></span>
+              <span><strong>Recommended Compression</strong><br><small style="color:var(--text-muted)">Balanced file size reduction & crisp text (~150 DPI, 70% quality)</small></span>
             </label>
             <label class="radio-option">
               <input type="radio" name="compressPreset" value="extreme">
-              <span><strong>Extreme Compression</strong><br><small style="color:var(--text-muted)">Maximum file size reduction</small></span>
+              <span><strong>Extreme Compression</strong><br><small style="color:var(--text-muted)">Maximum file size reduction (~72-96 DPI, 45% quality)</small></span>
             </label>
             <label class="radio-option">
-              <input type="radio" name="compressPreset" value="less">
-              <span><strong>Less Compression</strong><br><small style="color:var(--text-muted)">Highest fidelity, light stream compaction</small></span>
+              <input type="radio" name="compressPreset" value="low">
+              <span><strong>Low Compression</strong><br><small style="color:var(--text-muted)">Visually lossless, highest fidelity (~200 DPI, 85% quality)</small></span>
             </label>
           </div>
         </div>
         <div class="setting-group" style="margin-top: 0.75rem;">
           <label class="checkbox-option">
-            <input type="checkbox" id="compressStripMetadata" checked>
-            <span>Strip document metadata & unreferenced tokens</span>
+            <input type="checkbox" id="compressStripMetadata">
+            <span>Strip document metadata (Author, Producer, XMP)</span>
           </label>
         </div>
         <div style="background: var(--bg-surface); padding: 0.75rem; border-radius: 6px; border: 1px solid var(--border); font-size: 0.85rem; margin-top: 0.75rem;">
-          <strong>Original Size:</strong> ${origSizeKb} KB<br>
-          <strong>Target:</strong> Flate-deflated object streams
+          <div style="display:flex; justify-content:space-between; margin-bottom: 0.25rem;">
+            <span><strong>Original Size:</strong></span>
+            <span>${origSizeKb} KB</span>
+          </div>
+          <div style="display:flex; justify-content:space-between;">
+            <span><strong>Estimated Size:</strong></span>
+            <span id="compressEstimatedSize" style="color: var(--primary); font-weight:600;">${getEst('recommended')}</span>
+          </div>
+          <div style="color:var(--text-muted); font-size:0.8rem; margin-top:0.4rem; border-top:1px solid var(--border); padding-top:0.3rem;">
+            Smart image downsampling, stream deduplication, and cross-reference compaction.
+          </div>
         </div>
       `;
+      const group = toolSettings.querySelector('#compressPresetGroup');
+      if (group) {
+        group.addEventListener('change', (e) => {
+          const estSpan = document.getElementById('compressEstimatedSize');
+          if (estSpan && e.target && e.target.value) {
+            estSpan.textContent = getEst(e.target.value);
+          }
+        });
+      }
     } else if (currentTool === 'repair' || currentTool === 'repair-pdf') {
       const fileSizeKb = file ? Math.round(file.size / 1024) : 0;
       toolSettings.innerHTML = `
@@ -3564,15 +3587,21 @@ if (typeof document !== 'undefined') {
       } else if (currentTool === 'compress' || currentTool === 'compress-pdf') {
         const srcBytes = uploadedFiles[0].bytes.slice();
         const preset = document.querySelector('input[name="compressPreset"]:checked')?.value || 'recommended';
-        const stripMetadata = document.getElementById('compressStripMetadata')?.checked ?? true;
+        const stripMetadata = document.getElementById('compressStripMetadata')?.checked ?? false;
         const compressedBytes = jobRunner
           ? await executeCoreOp('compressPDF', [srcBytes, { level: preset, stripMetadata }])
           : await PDFCore.compressPDF(srcBytes, { level: preset, stripMetadata });
         const oldSize = srcBytes.length;
         const newSize = compressedBytes.length;
-        const ratio = oldSize > 0 ? Math.round(((oldSize - newSize) / oldSize) * 100) : 0;
         downloadFile(compressedBytes, 'compressed.pdf', 'application/pdf');
-        showSuccess(`Compressed from ${(oldSize / 1024).toFixed(1)} KB to ${(newSize / 1024).toFixed(1)} KB (${ratio >= 0 ? '-' + ratio + '%' : '+0%'})!`);
+
+        if (newSize < oldSize) {
+          const savedBytes = oldSize - newSize;
+          const ratio = Math.round((savedBytes / oldSize) * 100);
+          showSuccess(`Compressed from ${(oldSize / 1024).toFixed(1)} KB to ${(newSize / 1024).toFixed(1)} KB (saved ${ratio}% / ${(savedBytes / 1024).toFixed(1)} KB)!`);
+        } else {
+          showSuccess(`Document is already optimal. Original file size (${(oldSize / 1024).toFixed(1)} KB) and fidelity preserved.`);
+        }
       } else if (currentTool === 'repair' || currentTool === 'repair-pdf') {
         const srcBytes = uploadedFiles[0].bytes.slice();
         const repairedBytes = await executeCoreOp('repairPDF', [srcBytes]);

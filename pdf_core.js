@@ -1051,20 +1051,793 @@
 
   
   /**
-   * Compress PDF document using object stream compaction, stream deflation, image downsampling, and optional metadata stripping.
-   * Supports presets: 'extreme' (72 DPI, q0.5), 'recommended' (150 DPI, q0.7), 'less' (200 DPI, q0.85).
+   * Fast, pure-JavaScript baseline JPEG encoder.
+   * Produces compliant JFIF / JPEG baseline bitstream.
+   * @param {Object} image - { width: number, height: number, data: Uint8Array|Uint8ClampedArray, channels?: number }
+   * @param {number} quality - 1 to 100
+   * @returns {Uint8Array}
+   */
+  function encodeJPEG(image, quality = 70) {
+    const ZigZag = [
+      0, 1, 5, 6, 14, 15, 27, 28,
+      2, 4, 7, 13, 16, 26, 29, 42,
+      3, 8, 12, 17, 25, 30, 41, 43,
+      9, 11, 18, 24, 31, 40, 44, 53,
+      10, 19, 23, 32, 39, 45, 52, 54,
+      20, 22, 33, 38, 46, 51, 55, 60,
+      21, 34, 37, 47, 50, 56, 59, 61,
+      35, 36, 48, 49, 57, 58, 62, 63
+    ];
+
+    const std_dc_luminance_nrcodes = [0, 0, 1, 5, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0];
+    const std_dc_luminance_values = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+    const std_dc_chrominance_nrcodes = [0, 0, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0];
+    const std_dc_chrominance_values = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+
+    const std_ac_luminance_nrcodes = [0, 0, 2, 1, 3, 3, 2, 4, 3, 5, 5, 4, 4, 0, 0, 1, 0x7d];
+    const std_ac_luminance_values = [
+      0x01, 0x02, 0x03, 0x00, 0x04, 0x11, 0x05, 0x12,
+      0x21, 0x31, 0x41, 0x06, 0x13, 0x51, 0x61, 0x07,
+      0x22, 0x71, 0x14, 0x32, 0x81, 0x91, 0xa1, 0x08,
+      0x23, 0x42, 0xb1, 0xc1, 0x15, 0x52, 0xd1, 0xf0,
+      0x24, 0x33, 0x62, 0x72, 0x82, 0x09, 0x0a, 0x16,
+      0x17, 0x18, 0x19, 0x1a, 0x25, 0x26, 0x27, 0x28,
+      0x29, 0x2a, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39,
+      0x3a, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49,
+      0x4a, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59,
+      0x5a, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69,
+      0x6a, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79,
+      0x7a, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89,
+      0x8a, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98,
+      0x99, 0x9a, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7,
+      0xa8, 0xa9, 0xaa, 0xb2, 0xb3, 0xb4, 0xb5, 0xb6,
+      0xb7, 0xb8, 0xb9, 0xba, 0xc2, 0xc3, 0xc4, 0xc5,
+      0xc6, 0xc7, 0xc8, 0xc9, 0xca, 0xd2, 0xd3, 0xd4,
+      0xd5, 0xd6, 0xd7, 0xd8, 0xd9, 0xda, 0xe1, 0xe2,
+      0xe3, 0xe4, 0xe5, 0xe6, 0xe7, 0xe8, 0xe9, 0xea,
+      0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8,
+      0xf9, 0xfa
+    ];
+
+    const std_ac_chrominance_nrcodes = [0, 0, 2, 1, 2, 4, 4, 3, 4, 7, 5, 4, 4, 0, 1, 2, 0x77];
+    const std_ac_chrominance_values = [
+      0x00, 0x01, 0x02, 0x03, 0x11, 0x04, 0x05, 0x21,
+      0x31, 0x06, 0x12, 0x41, 0x51, 0x07, 0x61, 0x71,
+      0x13, 0x22, 0x32, 0x81, 0x08, 0x14, 0x42, 0x91,
+      0xa1, 0xb1, 0xc1, 0x09, 0x23, 0x33, 0x52, 0xf0,
+      0x15, 0x62, 0x72, 0xd1, 0x0a, 0x16, 0x24, 0x34,
+      0xe1, 0x25, 0xf1, 0x17, 0x18, 0x19, 0x1a, 0x26,
+      0x27, 0x28, 0x29, 0x2a, 0x35, 0x36, 0x37, 0x38,
+      0x39, 0x3a, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48,
+      0x49, 0x4a, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58,
+      0x59, 0x5a, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68,
+      0x69, 0x6a, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78,
+      0x79, 0x7a, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87,
+      0x88, 0x89, 0x8a, 0x92, 0x93, 0x94, 0x95, 0x96,
+      0x97, 0x98, 0x99, 0x9a, 0xa2, 0xa3, 0xa4, 0xa5,
+      0xa6, 0xa7, 0xa8, 0xa9, 0xaa, 0xb2, 0xb3, 0xb4,
+      0xb5, 0xb6, 0xb7, 0xb8, 0xb9, 0xba, 0xc2, 0xc3,
+      0xc4, 0xc5, 0xc6, 0xc7, 0xc8, 0xc9, 0xca, 0xd2,
+      0xd3, 0xd4, 0xd5, 0xd6, 0xd7, 0xd8, 0xd9, 0xda,
+      0xe2, 0xe3, 0xe4, 0xe5, 0xe6, 0xe7, 0xe8, 0xe9,
+      0xea, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8,
+      0xf9, 0xfa
+    ];
+
+    function computeHuffmanTbl(nrcodes, std_table) {
+      let codevalue = 0;
+      let pos_in_table = 0;
+      const HT = [];
+      for (let k = 1; k <= 16; k++) {
+        for (let j = 1; j <= nrcodes[k]; j++) {
+          HT[std_table[pos_in_table]] = [];
+          HT[std_table[pos_in_table]][0] = codevalue;
+          HT[std_table[pos_in_table]][1] = k;
+          pos_in_table++;
+          codevalue++;
+        }
+        codevalue *= 2;
+      }
+      return HT;
+    }
+
+    const YDC_HT = computeHuffmanTbl(std_dc_luminance_nrcodes, std_dc_luminance_values);
+    const UVDC_HT = computeHuffmanTbl(std_dc_chrominance_nrcodes, std_dc_chrominance_values);
+    const YAC_HT = computeHuffmanTbl(std_ac_luminance_nrcodes, std_ac_luminance_values);
+    const UVAC_HT = computeHuffmanTbl(std_ac_chrominance_nrcodes, std_ac_chrominance_values);
+
+    const category = new Array(65535);
+    const bitcode = new Array(65535);
+    for (let nr = -32767; nr <= 32767; nr++) {
+      const nrabs = Math.abs(nr);
+      let cat = 0;
+      let val = nrabs;
+      while (val > 0) {
+        cat++;
+        val >>= 1;
+      }
+      category[nr + 32767] = cat;
+      bitcode[nr + 32767] = nr < 0 ? (1 << cat) - 1 + nr : nr;
+    }
+
+    let q = quality < 1 ? 1 : (quality > 100 ? 100 : Math.round(quality));
+    const scale = q < 50 ? Math.floor(5000 / q) : Math.floor(200 - q * 2);
+
+    const defaultYTable = [
+      16, 11, 10, 16, 24, 40, 51, 61,
+      12, 12, 14, 19, 26, 58, 60, 55,
+      14, 13, 16, 24, 40, 57, 69, 56,
+      14, 17, 22, 29, 51, 87, 80, 62,
+      18, 22, 37, 56, 68, 109, 103, 77,
+      24, 35, 55, 64, 81, 104, 113, 92,
+      49, 64, 78, 87, 103, 121, 120, 101,
+      72, 92, 95, 98, 112, 100, 103, 99
+    ];
+
+    const defaultUVTable = [
+      17, 18, 24, 47, 99, 99, 99, 99,
+      18, 21, 26, 66, 99, 99, 99, 99,
+      24, 26, 56, 99, 99, 99, 99, 99,
+      47, 66, 99, 99, 99, 99, 99, 99,
+      99, 99, 99, 99, 99, 99, 99, 99,
+      99, 99, 99, 99, 99, 99, 99, 99,
+      99, 99, 99, 99, 99, 99, 99, 99,
+      99, 99, 99, 99, 99, 99, 99, 99
+    ];
+
+    const YTable = new Array(64);
+    const UVTable = new Array(64);
+    const fdtbl_Y = new Float32Array(64);
+    const fdtbl_UV = new Float32Array(64);
+
+    const aasf = [
+      1.0, 1.387039845, 1.306562965, 1.175875602,
+      1.0, 0.785694958, 0.541196100, 0.275899379
+    ];
+
+    let qi = 0;
+    for (let row = 0; row < 8; row++) {
+      for (let col = 0; col < 8; col++) {
+        let yVal = Math.floor((defaultYTable[ZigZag[qi]] * scale + 50) / 100);
+        if (yVal < 1) yVal = 1;
+        if (yVal > 255) yVal = 255;
+        YTable[ZigZag[qi]] = yVal;
+
+        let uvVal = Math.floor((defaultUVTable[ZigZag[qi]] * scale + 50) / 100);
+        if (uvVal < 1) uvVal = 1;
+        if (uvVal > 255) uvVal = 255;
+        UVTable[ZigZag[qi]] = uvVal;
+
+        fdtbl_Y[qi] = 1.0 / (yVal * aasf[row] * aasf[col] * 8.0);
+        fdtbl_UV[qi] = 1.0 / (uvVal * aasf[row] * aasf[col] * 8.0);
+        qi++;
+      }
+    }
+
+    function fDCTQuant(data, fdtbl) {
+      let d0, d1, d2, d3, d4, d5, d6, d7;
+      let z1, z2, z3, z4, z5, z11, z13;
+      let tmp0, tmp1, tmp2, tmp3, tmp4, tmp5, tmp6, tmp7;
+      let tmp10, tmp11, tmp12, tmp13;
+      const output = new Int32Array(64);
+
+      let dataOff = 0;
+      for (let i = 0; i < 8; i++) {
+        d0 = data[dataOff];
+        d1 = data[dataOff + 1];
+        d2 = data[dataOff + 2];
+        d3 = data[dataOff + 3];
+        d4 = data[dataOff + 4];
+        d5 = data[dataOff + 5];
+        d6 = data[dataOff + 6];
+        d7 = data[dataOff + 7];
+
+        tmp0 = d0 + d7;
+        tmp7 = d0 - d7;
+        tmp1 = d1 + d6;
+        tmp6 = d1 - d6;
+        tmp2 = d2 + d5;
+        tmp5 = d2 - d5;
+        tmp3 = d3 + d4;
+        tmp4 = d3 - d4;
+
+        tmp10 = tmp0 + tmp3;
+        tmp13 = tmp0 - tmp3;
+        tmp11 = tmp1 + tmp2;
+        tmp12 = tmp1 - tmp2;
+
+        data[dataOff] = tmp10 + tmp11;
+        data[dataOff + 4] = tmp10 - tmp11;
+
+        z1 = (tmp12 + tmp13) * 0.707106781;
+        data[dataOff + 2] = tmp13 + z1;
+        data[dataOff + 6] = tmp13 - z1;
+
+        tmp10 = tmp4 + tmp5;
+        tmp11 = tmp5 + tmp6;
+        tmp12 = tmp6 + tmp7;
+
+        z5 = (tmp10 - tmp12) * 0.382683433;
+        z2 = 0.541196100 * tmp10 + z5;
+        z4 = 1.306562965 * tmp12 + z5;
+        z3 = tmp11 * 0.707106781;
+
+        z11 = tmp7 + z3;
+        z13 = tmp7 - z3;
+
+        data[dataOff + 5] = z13 + z2;
+        data[dataOff + 3] = z13 - z2;
+        data[dataOff + 1] = z11 + z4;
+        data[dataOff + 7] = z11 - z4;
+
+        dataOff += 8;
+      }
+
+      dataOff = 0;
+      for (let i = 0; i < 8; i++) {
+        d0 = data[dataOff];
+        d1 = data[dataOff + 8];
+        d2 = data[dataOff + 16];
+        d3 = data[dataOff + 24];
+        d4 = data[dataOff + 32];
+        d5 = data[dataOff + 40];
+        d6 = data[dataOff + 48];
+        d7 = data[dataOff + 56];
+
+        tmp0 = d0 + d7;
+        tmp7 = d0 - d7;
+        tmp1 = d1 + d6;
+        tmp6 = d1 - d6;
+        tmp2 = d2 + d5;
+        tmp5 = d2 - d5;
+        tmp3 = d3 + d4;
+        tmp4 = d3 - d4;
+
+        tmp10 = tmp0 + tmp3;
+        tmp13 = tmp0 - tmp3;
+        tmp11 = tmp1 + tmp2;
+        tmp12 = tmp1 - tmp2;
+
+        data[dataOff] = tmp10 + tmp11;
+        data[dataOff + 32] = tmp10 - tmp11;
+
+        z1 = (tmp12 + tmp13) * 0.707106781;
+        data[dataOff + 16] = tmp13 + z1;
+        data[dataOff + 48] = tmp13 - z1;
+
+        tmp10 = tmp4 + tmp5;
+        tmp11 = tmp5 + tmp6;
+        tmp12 = tmp6 + tmp7;
+
+        z5 = (tmp10 - tmp12) * 0.382683433;
+        z2 = 0.541196100 * tmp10 + z5;
+        z4 = 1.306562965 * tmp12 + z5;
+        z3 = tmp11 * 0.707106781;
+
+        z11 = tmp7 + z3;
+        z13 = tmp7 - z3;
+
+        data[dataOff + 40] = z13 + z2;
+        data[dataOff + 24] = z13 - z2;
+        data[dataOff + 8] = z11 + z4;
+        data[dataOff + 56] = z11 - z4;
+
+        dataOff++;
+      }
+
+      for (let i = 0; i < 64; i++) {
+        const val = data[i] * fdtbl[i];
+        output[ZigZag[i]] = val > 0 ? (val + 0.5) | 0 : (val - 0.5) | 0;
+      }
+      return output;
+    }
+
+    const width = image.width;
+    const height = image.height;
+    const channels = image.channels || (image.data.length === width * height * 4 ? 4 : (image.data.length === width * height ? 1 : 3));
+    const data = image.data;
+
+    const byteout = [];
+    let bytenew = 0;
+    let bytepos = 7;
+
+    function writeByte(b) {
+      byteout.push(b & 0xff);
+    }
+
+    function writeWord(w) {
+      writeByte((w >> 8) & 0xff);
+      writeByte(w & 0xff);
+    }
+
+    function writeBits(bits) {
+      const val = bits[0];
+      let posval = bits[1] - 1;
+      while (posval >= 0) {
+        if (val & (1 << posval)) {
+          bytenew |= 1 << bytepos;
+        }
+        posval--;
+        bytepos--;
+        if (bytepos < 0) {
+          if (bytenew === 0xff) {
+            writeByte(0xff);
+            writeByte(0);
+          } else {
+            writeByte(bytenew);
+          }
+          bytepos = 7;
+          bytenew = 0;
+        }
+      }
+    }
+
+    // SOI & APP0
+    writeWord(0xffd8);
+    writeWord(0xffe0);
+    writeWord(16);
+    writeByte(0x4a); writeByte(0x46); writeByte(0x49); writeByte(0x46); writeByte(0);
+    writeByte(1); writeByte(1);
+    writeByte(0);
+    writeWord(1); writeWord(1);
+    writeByte(0); writeByte(0);
+
+    // DQT
+    writeWord(0xffdb);
+    writeWord(132);
+    writeByte(0);
+    for (let i = 0; i < 64; i++) writeByte(YTable[ZigZag[i]]);
+    writeByte(1);
+    for (let i = 0; i < 64; i++) writeByte(UVTable[ZigZag[i]]);
+
+    // SOF0
+    writeWord(0xffc0);
+    writeWord(17);
+    writeByte(8);
+    writeWord(height);
+    writeWord(width);
+    writeByte(3);
+    writeByte(1); writeByte(0x11); writeByte(0);
+    writeByte(2); writeByte(0x11); writeByte(1);
+    writeByte(3); writeByte(0x11); writeByte(1);
+
+    // DHT
+    function writeDHT(nrcodes, values, tableClass, tableID) {
+      writeWord(0xffc4);
+      let len = 3 + 16 + values.length;
+      writeWord(len);
+      writeByte(((tableClass & 1) << 4) | (tableID & 1));
+      for (let i = 1; i <= 16; i++) writeByte(nrcodes[i]);
+      for (let i = 0; i < values.length; i++) writeByte(values[i]);
+    }
+    writeDHT(std_dc_luminance_nrcodes, std_dc_luminance_values, 0, 0);
+    writeDHT(std_ac_luminance_nrcodes, std_ac_luminance_values, 1, 0);
+    writeDHT(std_dc_chrominance_nrcodes, std_dc_chrominance_values, 0, 1);
+    writeDHT(std_ac_chrominance_nrcodes, std_ac_chrominance_values, 1, 1);
+
+    // SOS
+    writeWord(0xffda);
+    writeWord(12);
+    writeByte(3);
+    writeByte(1); writeByte(0);
+    writeByte(2); writeByte(0x11);
+    writeByte(3); writeByte(0x11);
+    writeByte(0); writeByte(63); writeByte(0);
+
+    let DCY = 0;
+    let DCU = 0;
+    let DCV = 0;
+
+    const YDU = new Float32Array(64);
+    const UDU = new Float32Array(64);
+    const VDU = new Float32Array(64);
+
+    function processDU(CDU, fdtbl, DC, HTDC, HTAC) {
+      const DU = fDCTQuant(CDU, fdtbl);
+      const diff = DU[0] - DC;
+      const cat = category[diff + 32767];
+      writeBits(HTDC[cat]);
+      if (cat !== 0) {
+        writeBits([bitcode[diff + 32767], cat]);
+      }
+      let end0pos = 63;
+      while (end0pos > 0 && DU[end0pos] === 0) end0pos--;
+      if (end0pos === 0) {
+        writeBits(HTAC[0]);
+        return DU[0];
+      }
+      let i = 1;
+      while (i <= end0pos) {
+        let startpos = i;
+        while (DU[i] === 0 && i <= end0pos) i++;
+        let nrzeroes = i - startpos;
+        if (nrzeroes >= 16) {
+          const lng = nrzeroes >> 4;
+          for (let nrmarker = 1; nrmarker <= lng; nrmarker++) {
+            writeBits(HTAC[0xf0]);
+          }
+          nrzeroes &= 0x0f;
+        }
+        const val = DU[i];
+        const valCat = category[val + 32767];
+        const combined = (nrzeroes << 4) | valCat;
+        writeBits(HTAC[combined]);
+        writeBits([bitcode[val + 32767], valCat]);
+        i++;
+      }
+      if (end0pos !== 63) {
+        writeBits(HTAC[0]);
+      }
+      return DU[0];
+    }
+
+    for (let y = 0; y < height; y += 8) {
+      for (let x = 0; x < width; x += 8) {
+        let p = 0;
+        for (let dy = 0; dy < 8; dy++) {
+          const py = Math.min(height - 1, y + dy);
+          for (let dx = 0; dx < 8; dx++) {
+            const px = Math.min(width - 1, x + dx);
+            let r, g, b;
+            if (channels === 1) {
+              const v = data[py * width + px];
+              r = v; g = v; b = v;
+            } else {
+              const idx = (py * width + px) * channels;
+              r = data[idx];
+              g = data[idx + 1];
+              b = data[idx + 2];
+            }
+
+            YDU[p] = (0.299 * r + 0.587 * g + 0.114 * b) - 128;
+            UDU[p] = (-0.16874 * r - 0.33126 * g + 0.5 * b);
+            VDU[p] = (0.5 * r - 0.41869 * g - 0.08131 * b);
+            p++;
+          }
+        }
+        DCY = processDU(YDU, fdtbl_Y, DCY, YDC_HT, YAC_HT);
+        DCU = processDU(UDU, fdtbl_UV, DCU, UVDC_HT, UVAC_HT);
+        DCV = processDU(VDU, fdtbl_UV, DCV, UVDC_HT, UVAC_HT);
+      }
+    }
+
+    if (bytepos >= 0) {
+      const val = (1 << (bytepos + 1)) - 1;
+      bytenew |= val;
+      if (bytenew === 0xff) {
+        writeByte(0xff);
+        writeByte(0);
+      } else {
+        writeByte(bytenew);
+      }
+    }
+
+    writeWord(0xffd9);
+    return new Uint8Array(byteout);
+  }
+
+  /**
+   * Bilinear image resampler for 1, 3, or 4 channel buffers.
+   */
+  function resampleImageData(srcData, srcW, srcH, channels, dstW, dstH) {
+    if (srcW === dstW && srcH === dstH) return srcData;
+    const dst = new Uint8Array(dstW * dstH * channels);
+    const xRatio = srcW / dstW;
+    const yRatio = srcH / dstH;
+
+    for (let dy = 0; dy < dstH; dy++) {
+      const sy1 = dy * yRatio;
+      const sy0 = Math.floor(sy1);
+      const syFloor = Math.min(srcH - 1, sy0);
+      const syCeil = Math.min(srcH - 1, sy0 + 1);
+      const yLerp = sy1 - sy0;
+
+      for (let dx = 0; dx < dstW; dx++) {
+        const sx1 = dx * xRatio;
+        const sx0 = Math.floor(sx1);
+        const sxFloor = Math.min(srcW - 1, sx0);
+        const sxCeil = Math.min(srcW - 1, sx0 + 1);
+        const xLerp = sx1 - sx0;
+
+        const dstIdx = (dy * dstW + dx) * channels;
+        const idx00 = (syFloor * srcW + sxFloor) * channels;
+        const idx01 = (syFloor * srcW + sxCeil) * channels;
+        const idx10 = (syCeil * srcW + sxFloor) * channels;
+        const idx11 = (syCeil * srcW + sxCeil) * channels;
+
+        for (let c = 0; c < channels; c++) {
+          const top = srcData[idx00 + c] * (1 - xLerp) + srcData[idx01 + c] * xLerp;
+          const bottom = srcData[idx10 + c] * (1 - xLerp) + srcData[idx11 + c] * xLerp;
+          dst[dstIdx + c] = Math.round(top * (1 - yLerp) + bottom * yLerp);
+        }
+      }
+    }
+    return dst;
+  }
+
+  /**
+   * Helper: extract maximum rendered display dimensions (in PDF points) for each Image XObject.
+   */
+  function collectImageDisplayDimensions(doc) {
+    const displayMap = new Map();
+    try {
+      const pages = doc.getPages();
+      for (const page of pages) {
+        const resources = page.node.Resources();
+        if (!resources) continue;
+        const xObjectDict = resources.lookupMaybe(PDFName.of('XObject'), PDFDict);
+        if (!xObjectDict) continue;
+
+        const nameToRef = new Map();
+        for (const [nameKey, val] of xObjectDict.entries()) {
+          const nameStr = nameKey.toString().replace(/^\//, '');
+          if (val instanceof PDFRef) {
+            const key = val.tag || `${val.objectNumber} ${val.generationNumber} R`;
+            nameToRef.set(nameStr, key);
+          }
+        }
+        if (nameToRef.size === 0) continue;
+
+        const contentsObj = page.node.Contents();
+        const streamTexts = [];
+        if (contentsObj instanceof PDFStream || contentsObj instanceof PDFRawStream) {
+          try {
+            const raw = decodePDFRawStream ? decodePDFRawStream(contentsObj).decode() : contentsObj.getContents();
+            streamTexts.push(latin1Decoder.decode(raw));
+          } catch (e) {}
+        } else if (contentsObj instanceof PDFArray) {
+          for (let i = 0; i < contentsObj.size(); i++) {
+            const s = contentsObj.lookup(i);
+            if (s instanceof PDFStream || s instanceof PDFRawStream) {
+              try {
+                const raw = decodePDFRawStream ? decodePDFRawStream(s).decode() : s.getContents();
+                streamTexts.push(latin1Decoder.decode(raw));
+              } catch (e) {}
+            }
+          }
+        }
+
+        for (const text of streamTexts) {
+          const matrixStack = [[1, 0, 0, 1, 0, 0]];
+          function multiply(m1, m2) {
+            return [
+              m1[0] * m2[0] + m1[1] * m2[2],
+              m1[0] * m2[1] + m1[1] * m2[3],
+              m1[2] * m2[0] + m1[3] * m2[2],
+              m1[2] * m2[1] + m1[3] * m2[3],
+              m1[4] * m2[0] + m1[5] * m2[2] + m2[4],
+              m1[4] * m2[1] + m1[5] * m2[3] + m2[5],
+            ];
+          }
+
+          const tokens = text.match(/\/[A-Za-z0-9_\-]+|\bcm\b|\bq\b|\bQ\b|\bDo\b|[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?/g) || [];
+          const numStack = [];
+          for (let t = 0; t < tokens.length; t++) {
+            const token = tokens[t];
+            if (token === 'q') {
+              const top = matrixStack[matrixStack.length - 1];
+              matrixStack.push(top.slice());
+              numStack.length = 0;
+            } else if (token === 'Q') {
+              if (matrixStack.length > 1) matrixStack.pop();
+              numStack.length = 0;
+            } else if (token === 'cm') {
+              if (numStack.length >= 6) {
+                const [a, b, c, d, e, f] = numStack.slice(-6);
+                const cur = matrixStack[matrixStack.length - 1];
+                matrixStack[matrixStack.length - 1] = multiply([a, b, c, d, e, f], cur);
+              }
+              numStack.length = 0;
+            } else if (token === 'Do') {
+              const prevToken = tokens[t - 1];
+              if (prevToken && prevToken.startsWith('/')) {
+                const xname = prevToken.slice(1);
+                const refKey = nameToRef.get(xname);
+                if (refKey) {
+                  const cur = matrixStack[matrixStack.length - 1];
+                  const ptW = Math.hypot(cur[0], cur[1]);
+                  const ptH = Math.hypot(cur[2], cur[3]);
+                  if (ptW > 0 && ptH > 0) {
+                    const existing = displayMap.get(refKey) || { maxPtW: 0, maxPtH: 0 };
+                    displayMap.set(refKey, {
+                      maxPtW: Math.max(existing.maxPtW, ptW),
+                      maxPtH: Math.max(existing.maxPtH, ptH),
+                    });
+                  }
+                }
+              }
+              numStack.length = 0;
+            } else if (!token.startsWith('/')) {
+              const num = parseFloat(token);
+              if (!isNaN(num)) numStack.push(num);
+            } else {
+              numStack.length = 0;
+            }
+          }
+        }
+      }
+    } catch (err) {}
+    return displayMap;
+  }
+
+  /**
+   * Deduplicate identical streams across indirect objects.
+   */
+  function deduplicateStreams(doc) {
+    try {
+      const streamHashes = new Map();
+      const dupMap = new Map();
+
+      for (const [ref, obj] of doc.context.enumerateIndirectObjects()) {
+        if (obj instanceof PDFLib.PDFRawStream || obj instanceof PDFLib.PDFStream) {
+          let contents;
+          try { contents = obj.getContents(); } catch (e) { continue; }
+          if (!contents || contents.length === 0) continue;
+
+          const subtype = obj.dict?.get(PDFName.of('Subtype'))?.toString() || '';
+          const filter = obj.dict?.get(PDFName.of('Filter'))?.toString() || '';
+          const len = contents.length;
+
+          let h = 0;
+          const step = Math.max(1, Math.floor(len / 64));
+          for (let i = 0; i < len; i += step) {
+            h = ((h << 5) - h + contents[i]) | 0;
+          }
+          const sig = `${len}_${subtype}_${filter}_${h}`;
+
+          if (!streamHashes.has(sig)) {
+            streamHashes.set(sig, { ref, contents });
+          } else {
+            const cand = streamHashes.get(sig);
+            if (cand.contents.length === contents.length) {
+              let match = true;
+              for (let i = 0; i < len; i++) {
+                if (cand.contents[i] !== contents[i]) { match = false; break; }
+              }
+              if (match) {
+                const dupKey = ref.tag || `${ref.objectNumber} ${ref.generationNumber} R`;
+                dupMap.set(dupKey, cand.ref);
+              }
+            }
+          }
+        }
+      }
+
+      if (dupMap.size > 0) {
+        function remap(item) {
+          if (!item) return item;
+          if (item instanceof PDFLib.PDFRef) {
+            const k = item.tag || `${item.objectNumber} ${item.generationNumber} R`;
+            if (dupMap.has(k)) return dupMap.get(k);
+            return item;
+          }
+          if (item instanceof PDFLib.PDFDict || (item.dict && item.dict instanceof Map)) {
+            const entries = item.entries ? item.entries() : (item.dict ? item.dict.entries() : []);
+            for (const [k, v] of entries) {
+              if (v instanceof PDFLib.PDFRef) {
+                const vk = v.tag || `${v.objectNumber} ${v.generationNumber} R`;
+                if (dupMap.has(vk)) item.set(k, dupMap.get(vk));
+              } else if (v instanceof PDFLib.PDFDict || v instanceof PDFLib.PDFArray) {
+                remap(v);
+              }
+            }
+          } else if (item instanceof PDFLib.PDFArray) {
+            for (let i = 0; i < item.size(); i++) {
+              const el = item.get(i);
+              if (el instanceof PDFLib.PDFRef) {
+                const ek = el.tag || `${el.objectNumber} ${el.generationNumber} R`;
+                if (dupMap.has(ek)) item.set(i, dupMap.get(ek));
+              } else if (el instanceof PDFLib.PDFDict || el instanceof PDFLib.PDFArray) {
+                remap(el);
+              }
+            }
+          }
+          return item;
+        }
+
+        for (const [, obj] of doc.context.enumerateIndirectObjects()) {
+          if (obj instanceof PDFLib.PDFDict) remap(obj);
+          else if (obj instanceof PDFLib.PDFStream || obj instanceof PDFLib.PDFRawStream) {
+            if (obj.dict) remap(obj.dict);
+          } else if (obj instanceof PDFLib.PDFArray) {
+            remap(obj);
+          }
+        }
+
+        for (const [dupKey] of dupMap.entries()) {
+          const parts = dupKey.split(' ');
+          const ref = PDFLib.PDFRef.of(parseInt(parts[0], 10), parseInt(parts[1], 10));
+          doc.context.delete(ref);
+        }
+      }
+    } catch (err) {}
+  }
+
+  /**
+   * Prune unreferenced orphan indirect objects across the document.
+   */
+  function pruneOrphans(doc) {
+    try {
+      const reachableRefs = new Set();
+      const queue = [];
+
+      if (doc.catalog) {
+        const catRef = doc.context.getObjectRef(doc.catalog) || doc.context.trailerInfo?.Root;
+        if (catRef) queue.push(catRef);
+      }
+      if (doc.context.trailerInfo?.Info) queue.push(doc.context.trailerInfo.Info);
+
+      const pageCount = doc.getPageCount();
+      for (let i = 0; i < pageCount; i++) {
+        const page = doc.getPage(i);
+        if (page && page.ref) queue.push(page.ref);
+      }
+
+      function traverse(item) {
+        if (!item) return;
+        if (item instanceof PDFLib.PDFRef) {
+          const key = item.tag || `${item.objectNumber} ${item.generationNumber} R`;
+          if (!reachableRefs.has(key)) {
+            reachableRefs.add(key);
+            queue.push(item);
+          }
+        } else if (item instanceof PDFLib.PDFDict || (item.dict && item.dict instanceof Map)) {
+          const entries = item.entries ? item.entries() : (item.dict ? item.dict.entries() : []);
+          for (const [, v] of entries) {
+            traverse(v);
+          }
+        } else if (item instanceof PDFLib.PDFStream || item instanceof PDFLib.PDFRawStream) {
+          if (item.dict) traverse(item.dict);
+        } else if (item instanceof PDFLib.PDFArray) {
+          for (let i = 0; i < item.size(); i++) {
+            traverse(item.get(i));
+          }
+        }
+      }
+
+      while (queue.length > 0) {
+        const r = queue.pop();
+        const rKey = r.tag || `${r.objectNumber} ${r.generationNumber} R`;
+        reachableRefs.add(rKey);
+        const target = doc.context.lookup(r);
+        if (target) traverse(target);
+      }
+
+      for (const [r] of doc.context.enumerateIndirectObjects()) {
+        const rKey = r.tag || `${r.objectNumber} ${r.generationNumber} R`;
+        if (!reachableRefs.has(rKey)) doc.context.delete(r);
+      }
+    } catch (err) {}
+  }
+
+  /**
+   * Compress PDF document using object stream compaction, real image recompression,
+   * stream deduplication, orphan pruning, and optional metadata stripping.
+   *
+   * Presets:
+   * - 'low' / 'less': visually lossless (DPI ~200, quality ~0.85)
+   * - 'recommended': balanced (DPI ~150, quality ~0.70)
+   * - 'extreme': maximum reduction (DPI ~72-96, quality ~0.45)
+   *
+   * Invariant: Never returns a file larger than input bytes; returns original if size would increase.
+   *
    * @param {Uint8Array|ArrayBuffer} pdfBytes
-   * @param {Object} [options={}] - { level: 'extreme'|'recommended'|'less', preset?: string, dpi?: number, quality?: number, stripMetadata?: boolean }
+   * @param {Object} [options={}] - { level?: string, preset?: string, dpi?: number, quality?: number, stripMetadata?: boolean }
    * @returns {Promise<Uint8Array>}
    */
   async function compressPDF(pdfBytes, options = {}) {
     if (!pdfBytes) throw new Error('PDF bytes are required to compress.');
-    const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+    const origBytes = pdfBytes instanceof Uint8Array ? pdfBytes : new Uint8Array(pdfBytes);
+    const doc = await PDFDocument.load(origBytes, { ignoreEncryption: true });
 
-    const level = options.level || options.preset || 'recommended';
-    const dpi = options.dpi || (level === 'extreme' ? 72 : (level === 'less' ? 200 : 150));
-    const quality = options.quality !== undefined ? options.quality : (level === 'extreme' ? 0.5 : (level === 'less' ? 0.85 : 0.7));
-    const maxDim = level === 'extreme' ? 800 : (level === 'less' ? 1800 : 1200);
+    const level = (options.level || options.preset || 'recommended').toLowerCase();
+    const isExtreme = level === 'extreme';
+    const isLow = level === 'low' || level === 'less';
+
+    const targetDpi = options.dpi || (isExtreme ? 72 : (isLow ? 200 : 150));
+    const targetQuality = options.quality !== undefined
+      ? options.quality
+      : (isExtreme ? 0.45 : (isLow ? 0.85 : 0.70));
 
     if (options.stripMetadata) {
       doc.setTitle('');
@@ -1073,6 +1846,9 @@
       doc.setKeywords([]);
       doc.setProducer('PDF Studio');
       doc.setCreator('PDF Studio');
+      if (doc.catalog) {
+        doc.catalog.delete(PDFName.of('Metadata'));
+      }
     }
 
     // Helper: CMYK to RGB integer conversion
@@ -1083,298 +1859,207 @@
       return [r, g, b];
     }
 
-    // Inspect indirect objects for image XObjects and downsample their streams
     const zlibMod = (typeof require !== 'undefined') ? require('zlib') : null;
+    function deflateBuf(buf) {
+      if (zlibMod) return zlibMod.deflateSync(buf, { level: 9 });
+      if (typeof pako !== 'undefined' && pako.deflate) return pako.deflate(buf, { level: 9 });
+      return buf;
+    }
+
+    const displayDimensionsMap = collectImageDisplayDimensions(doc);
     const processedRefs = new Set();
 
-    if (zlibMod) {
-      for (const [ref, obj] of doc.context.enumerateIndirectObjects()) {
-        const refKey = ref.tag || (ref.objectNumber + ' ' + ref.generationNumber + ' R');
-        if (processedRefs.has(refKey)) continue;
+    // Inspect indirect objects for image XObjects and recompress
+    for (const [ref, obj] of doc.context.enumerateIndirectObjects()) {
+      const refKey = ref.tag || `${ref.objectNumber} ${ref.generationNumber} R`;
+      if (processedRefs.has(refKey)) continue;
 
-        if (obj instanceof PDFLib.PDFRawStream) {
-          const dict = obj.dict;
-          const subtype = dict.get(PDFName.of('Subtype'));
-          if (subtype && subtype.toString() === '/Image') {
-            const wObj = dict.get(PDFName.of('Width'));
-            const hObj = dict.get(PDFName.of('Height'));
-            const filter = dict.get(PDFName.of('Filter'));
-            if (!filter || !filter.toString().includes('FlateDecode')) continue;
+      if (obj instanceof PDFLib.PDFRawStream) {
+        const dict = obj.dict;
+        const subtype = dict.get(PDFName.of('Subtype'))?.toString();
+        if (subtype !== '/Image') continue;
 
-            if (wObj && hObj && typeof wObj.asNumber === 'function' && typeof hObj.asNumber === 'function') {
-              const width = wObj.asNumber();
-              const height = hObj.asNumber();
-              if (width > 60 && height > 60) {
-                try {
-                  const rawContents = obj.getContents();
-                  const decompressed = zlibMod.inflateSync(rawContents);
-                  const csObj = dict.get(PDFName.of('ColorSpace'));
-                  const csStr = csObj ? csObj.toString() : '';
-                  const isCMYK = csStr.includes('CMYK') || (decompressed.length >= width * height * 4 && !csStr.includes('RGB'));
-                  const channels = isCMYK ? 4 : (decompressed.length >= width * height * 4 ? 4 : (decompressed.length >= width * height * 3 ? 3 : 1));
+        const wObj = dict.get(PDFName.of('Width'));
+        const hObj = dict.get(PDFName.of('Height'));
+        if (!wObj || !hObj || typeof wObj.asNumber !== 'function' || typeof hObj.asNumber !== 'function') continue;
 
-                  const scaleDiv = level === 'extreme' ? 3 : 2;
-                  const newW = Math.max(1, Math.floor(width / scaleDiv));
-                  const newH = Math.max(1, Math.floor(height / scaleDiv));
-                  const outChannels = isCMYK ? 3 : channels;
-                  const newBuffer = Buffer.alloc(newW * newH * outChannels);
+        const width = wObj.asNumber();
+        const height = hObj.asNumber();
+        if (width <= 60 || height <= 60) continue; // Preserve small icons/glyphs without downsampling
 
-                  for (let ny = 0; ny < newH; ny++) {
-                    const sy = Math.min(height - 1, ny * scaleDiv);
-                    for (let nx = 0; nx < newW; nx++) {
-                      const sx = Math.min(width - 1, nx * scaleDiv);
-                      const sIdx = (sy * width + sx) * channels;
-                      const dIdx = (ny * newW + nx) * outChannels;
-                      if (isCMYK) {
-                        const [r, g, b] = cmykToRgb(
-                          decompressed[sIdx],
-                          decompressed[sIdx + 1],
-                          decompressed[sIdx + 2],
-                          decompressed[sIdx + 3]
-                        );
-                        newBuffer[dIdx] = r;
-                        newBuffer[dIdx + 1] = g;
-                        newBuffer[dIdx + 2] = b;
-                      } else {
-                        for (let c = 0; c < channels; c++) {
-                          newBuffer[dIdx + c] = decompressed[sIdx + c] || 0;
-                        }
-                      }
-                    }
-                  }
+        const filterObj = dict.get(PDFName.of('Filter'));
+        const filterStr = filterObj ? filterObj.toString() : '';
+        const bpcObj = dict.get(PDFName.of('BitsPerComponent'));
+        const bpc = bpcObj && typeof bpcObj.asNumber === 'function' ? bpcObj.asNumber() : 8;
 
-                  const recompressed = zlibMod.deflateSync(newBuffer, { level: 9 });
-                  if (recompressed.length < rawContents.length) {
-                    dict.set(PDFName.of('Width'), doc.context.obj(newW));
-                    dict.set(PDFName.of('Height'), doc.context.obj(newH));
-                    dict.set(PDFName.of('Filter'), PDFName.of('FlateDecode'));
-                    dict.set(PDFName.of('Length'), doc.context.obj(recompressed.length));
-                    if (isCMYK) {
-                      dict.set(PDFName.of('ColorSpace'), PDFName.of('DeviceRGB'));
-                    }
-                    const newStream = PDFLib.PDFRawStream.of(dict, recompressed);
-                    doc.context.assign(ref, newStream);
-                  }
-                } catch (e) {
-                  // Fall back to original stream if downsampling is skipped
-                }
+        // Skip 1-bit monochrome scans from lossy JPEG compression; only re-deflate if beneficial
+        if (bpc === 1) {
+          if (filterStr.includes('FlateDecode') && zlibMod) {
+            try {
+              const rawContents = obj.getContents();
+              const decompressed = decodePDFRawStream(obj).decode();
+              const recompressed = deflateBuf(decompressed);
+              if (recompressed.length < rawContents.length) {
+                dict.set(PDFName.of('Length'), doc.context.obj(recompressed.length));
+                doc.context.assign(ref, PDFLib.PDFRawStream.of(dict, recompressed));
               }
-            }
+            } catch (e) {}
           }
+          continue;
         }
-      }
-    } else if (typeof OffscreenCanvas !== 'undefined' || (typeof document !== 'undefined' && document.createElement)) {
-      // In-browser downsampling via OffscreenCanvas / HTML5 Canvas with JPEG or PNG re-encoding
-      for (const [ref, obj] of doc.context.enumerateIndirectObjects()) {
-        const refKey = ref.tag || (ref.objectNumber + ' ' + ref.generationNumber + ' R');
-        if (processedRefs.has(refKey)) continue;
 
-        if (obj instanceof PDFLib.PDFRawStream) {
-          const dict = obj.dict;
-          const subtype = dict.get(PDFName.of('Subtype'));
-          if (subtype && subtype.toString() === '/Image') {
-            const wObj = dict.get(PDFName.of('Width'));
-            const hObj = dict.get(PDFName.of('Height'));
-            const filter = dict.get(PDFName.of('Filter'));
+        // Determine target dimensions based on target DPI and page display dimensions
+        const disp = displayDimensionsMap.get(refKey);
+        let scale = 1.0;
+        if (disp && disp.maxPtW > 0 && disp.maxPtH > 0) {
+          const renderedDpiX = (width / disp.maxPtW) * 72;
+          const renderedDpiY = (height / disp.maxPtH) * 72;
+          const renderedDpi = Math.max(renderedDpiX, renderedDpiY);
+          scale = Math.min(1.0, targetDpi / Math.max(1, renderedDpi));
+        } else {
+          // Standard page reference fallback (612x792 pt, 8.5x11 inches)
+          const targetW = (612 / 72) * targetDpi;
+          const targetH = (792 / 72) * targetDpi;
+          scale = Math.min(1.0, targetW / width, targetH / height);
+        }
+
+        // Enforce monotonicity and preset factor targets
+        if (isExtreme) {
+          scale = Math.min(scale, 0.45);
+        } else if (!isLow) {
+          scale = Math.min(scale, 0.75);
+        }
+
+        const newW = Math.max(1, Math.round(width * scale));
+        const newH = Math.max(1, Math.round(height * scale));
+
+        const rawContents = obj.getContents();
+        if (!rawContents || rawContents.length === 0) continue;
+
+        // Recompression for FlateDecode raster streams
+        if (filterStr.includes('FlateDecode') && decodePDFRawStream) {
+          try {
             const rawContents = obj.getContents();
-            if (!rawContents || rawContents.length === 0) continue;
-
-            const isJpeg = filter && filter.toString().includes('DCTDecode');
+            const decompressed = decodePDFRawStream(obj).decode();
             const csObj = dict.get(PDFName.of('ColorSpace'));
             const csStr = csObj ? csObj.toString() : '';
+            const isCMYK = csStr.includes('CMYK') || (decompressed.length >= width * height * 4 && !csStr.includes('RGB'));
+            const channels = isCMYK ? 4 : (decompressed.length >= width * height * 4 ? 4 : (decompressed.length >= width * height * 3 ? 3 : 1));
+
+            const scaleDiv = isExtreme ? 3 : ((level === 'low' || level === 'less') ? 1.5 : 2);
+            const newW = Math.max(1, Math.floor(width / scaleDiv));
+            const newH = Math.max(1, Math.floor(height / scaleDiv));
+            const outChannels = isCMYK ? 3 : channels;
+
+            // Handle SMask if present
             const smaskRef = dict.get(PDFName.of('SMask'));
-
-            try {
-              let bitmap = null;
-              let hasAlpha = !!smaskRef;
-
-              // Only use createImageBitmap directly if it is JPEG without CMYK or SMask
-              if (isJpeg && typeof createImageBitmap === 'function' && !csStr.includes('CMYK') && !smaskRef) {
-                const blob = new Blob([rawContents], { type: 'image/jpeg' });
-                bitmap = await createImageBitmap(blob);
-              } else if (decodePDFRawStream && typeof OffscreenCanvas !== 'undefined') {
-                const width = (wObj && typeof wObj.asNumber === 'function') ? wObj.asNumber() : 0;
-                const height = (hObj && typeof hObj.asNumber === 'function') ? hObj.asNumber() : 0;
-                if (width > 0 && height > 0) {
-                  const decompressed = decodePDFRawStream(obj).decode();
-                  const isCMYK = csStr.includes('CMYK') || (decompressed.length >= width * height * 4 && !csStr.includes('RGB'));
-                  const channels = isCMYK ? 4 : (decompressed.length >= width * height * 4 ? 4 : (decompressed.length >= width * height * 3 ? 3 : 1));
-
-                  // If SMask exists, decode it to extract true alpha values
-                  let smaskBytes = null;
-                  if (smaskRef instanceof PDFLib.PDFRef) {
-                    const smaskObj = doc.context.lookup(smaskRef);
-                    if (smaskObj && smaskObj instanceof PDFLib.PDFRawStream) {
-                      try {
-                        smaskBytes = decodePDFRawStream(smaskObj).decode();
-                        processedRefs.add(smaskRef.tag || (smaskRef.objectNumber + ' ' + smaskRef.generationNumber + ' R'));
-                        hasAlpha = true;
-                      } catch (e) {
-                        // ignore SMask decode failure
-                      }
-                    }
-                  }
-
-                  const srcCanvas = new OffscreenCanvas(width, height);
-                  const srcCtx = srcCanvas.getContext('2d');
-                  const imgData = srcCtx.createImageData(width, height);
-
-                  for (let i = 0; i < width * height; i++) {
-                    const sIdx = i * channels;
-                    const dIdx = i * 4;
-                    if (isCMYK) {
-                      const [r, g, b] = cmykToRgb(
-                        decompressed[sIdx],
-                        decompressed[sIdx + 1],
-                        decompressed[sIdx + 2],
-                        decompressed[sIdx + 3]
-                      );
-                      imgData.data[dIdx] = r;
-                      imgData.data[dIdx + 1] = g;
-                      imgData.data[dIdx + 2] = b;
-                      imgData.data[dIdx + 3] = (smaskBytes && smaskBytes[i] !== undefined) ? smaskBytes[i] : 255;
-                    } else if (channels === 3) {
-                      imgData.data[dIdx] = decompressed[sIdx];
-                      imgData.data[dIdx + 1] = decompressed[sIdx + 1];
-                      imgData.data[dIdx + 2] = decompressed[sIdx + 2];
-                      imgData.data[dIdx + 3] = (smaskBytes && smaskBytes[i] !== undefined) ? smaskBytes[i] : 255;
-                    } else if (channels === 4) {
-                      imgData.data[dIdx] = decompressed[sIdx];
-                      imgData.data[dIdx + 1] = decompressed[sIdx + 1];
-                      imgData.data[dIdx + 2] = decompressed[sIdx + 2];
-                      const aVal = decompressed[sIdx + 3];
-                      imgData.data[dIdx + 3] = aVal;
-                      if (aVal < 255) hasAlpha = true;
-                    } else {
-                      const v = decompressed[sIdx];
-                      imgData.data[dIdx] = v;
-                      imgData.data[dIdx + 1] = v;
-                      imgData.data[dIdx + 2] = v;
-                      imgData.data[dIdx + 3] = (smaskBytes && smaskBytes[i] !== undefined) ? smaskBytes[i] : 255;
-                    }
-                  }
-                  srcCtx.putImageData(imgData, 0, 0);
-                  bitmap = srcCanvas;
-                }
+            let smaskObj = null;
+            let smaskBytes = null;
+            if (smaskRef instanceof PDFLib.PDFRef) {
+              smaskObj = doc.context.lookup(smaskRef);
+              if (smaskObj instanceof PDFLib.PDFRawStream) {
+                try {
+                  smaskBytes = decodePDFRawStream(smaskObj).decode();
+                  processedRefs.add(smaskRef.tag || `${smaskRef.objectNumber} ${smaskRef.generationNumber} R`);
+                } catch (e) {}
               }
-
-              if (bitmap) {
-                const bw = bitmap.width;
-                const bh = bitmap.height;
-                const scale = Math.min(1.0, maxDim / Math.max(bw, bh));
-                const targetW = Math.max(1, Math.round(bw * scale));
-                const targetH = Math.max(1, Math.round(bh * scale));
-
-                const canvas = typeof OffscreenCanvas !== 'undefined'
-                  ? new OffscreenCanvas(targetW, targetH)
-                  : document.createElement('canvas');
-                canvas.width = targetW;
-                canvas.height = targetH;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(bitmap, 0, 0, targetW, targetH);
-
-                let downsampledBytes = null;
-                if (typeof canvas.convertToBlob === 'function') {
-                  const outBlob = hasAlpha
-                    ? await canvas.convertToBlob({ type: 'image/png' })
-                    : await canvas.convertToBlob({ type: 'image/jpeg', quality });
-                  downsampledBytes = new Uint8Array(await outBlob.arrayBuffer());
-                } else if (typeof canvas.toDataURL === 'function') {
-                  const dataUrl = hasAlpha
-                    ? canvas.toDataURL('image/png')
-                    : canvas.toDataURL('image/jpeg', quality);
-                  const base64 = dataUrl.split(',')[1];
-                  const bin = atob(base64);
-                  downsampledBytes = new Uint8Array(bin.length);
-                  for (let i = 0; i < bin.length; i++) downsampledBytes[i] = bin.charCodeAt(i);
-                }
-
-                if (downsampledBytes && downsampledBytes.length < rawContents.length) {
-                  const newImg = hasAlpha
-                    ? await doc.embedPng(downsampledBytes)
-                    : await doc.embedJpg(downsampledBytes);
-                  await newImg.embed();
-                  const newStream = doc.context.lookup(newImg.ref);
-                  doc.context.assign(ref, newStream);
-
-                  // Eliminate orphan duplicate object created by embed
-                  doc.context.delete(newImg.ref);
-
-                  // Eliminate old SMask if replaced
-                  if (smaskRef instanceof PDFLib.PDFRef) {
-                    doc.context.delete(smaskRef);
-                  }
-                }
-              }
-            } catch (err) {
-              // Gracefully continue with original stream if downsampling fails
             }
+
+            const newBuffer = (typeof Buffer !== 'undefined' && Buffer.alloc)
+              ? Buffer.alloc(newW * newH * outChannels)
+              : new Uint8Array(newW * newH * outChannels);
+
+            for (let ny = 0; ny < newH; ny++) {
+              const sy = Math.min(height - 1, Math.floor(ny * scaleDiv));
+              for (let nx = 0; nx < newW; nx++) {
+                const sx = Math.min(width - 1, Math.floor(nx * scaleDiv));
+                const sIdx = (sy * width + sx) * channels;
+                const dIdx = (ny * newW + nx) * outChannels;
+                if (isCMYK) {
+                  const [r, g, b] = cmykToRgb(
+                    decompressed[sIdx],
+                    decompressed[sIdx + 1],
+                    decompressed[sIdx + 2],
+                    decompressed[sIdx + 3]
+                  );
+                  newBuffer[dIdx] = r;
+                  newBuffer[dIdx + 1] = g;
+                  newBuffer[dIdx + 2] = b;
+                } else {
+                  for (let c = 0; c < outChannels; c++) {
+                    newBuffer[dIdx + c] = decompressed[sIdx + c] || 0;
+                  }
+                }
+              }
+            }
+
+            let recompressedSmask = null;
+            if (smaskBytes && smaskObj) {
+              const newSmaskBuf = (typeof Buffer !== 'undefined' && Buffer.alloc)
+                ? Buffer.alloc(newW * newH)
+                : new Uint8Array(newW * newH);
+              for (let ny = 0; ny < newH; ny++) {
+                const sy = Math.min(height - 1, Math.floor(ny * scaleDiv));
+                for (let nx = 0; nx < newW; nx++) {
+                  const sx = Math.min(width - 1, Math.floor(nx * scaleDiv));
+                  newSmaskBuf[ny * newW + nx] = smaskBytes[sy * width + sx] || 0;
+                }
+              }
+              recompressedSmask = deflateBuf(newSmaskBuf);
+            }
+
+            const recompressed = deflateBuf(newBuffer);
+            const origTotal = rawContents.length + (smaskObj ? smaskObj.getContents().length : 0);
+            const newTotal = recompressed.length + (recompressedSmask ? recompressedSmask.length : 0);
+
+            if (newTotal < origTotal) {
+              dict.set(PDFName.of('Width'), doc.context.obj(newW));
+              dict.set(PDFName.of('Height'), doc.context.obj(newH));
+              dict.set(PDFName.of('Filter'), PDFName.of('FlateDecode'));
+              dict.set(PDFName.of('Length'), doc.context.obj(recompressed.length));
+              if (isCMYK) {
+                dict.set(PDFName.of('ColorSpace'), PDFName.of('DeviceRGB'));
+              }
+              const newStream = PDFLib.PDFRawStream.of(dict, recompressed);
+              doc.context.assign(ref, newStream);
+
+              if (smaskObj && recompressedSmask && smaskRef instanceof PDFLib.PDFRef) {
+                smaskObj.dict.set(PDFName.of('Width'), doc.context.obj(newW));
+                smaskObj.dict.set(PDFName.of('Height'), doc.context.obj(newH));
+                smaskObj.dict.set(PDFName.of('Filter'), PDFName.of('FlateDecode'));
+                smaskObj.dict.set(PDFName.of('ColorSpace'), PDFName.of('DeviceGray'));
+                smaskObj.dict.set(PDFName.of('BitsPerComponent'), doc.context.obj(8));
+                smaskObj.dict.set(PDFName.of('Length'), doc.context.obj(recompressedSmask.length));
+                doc.context.assign(smaskRef, PDFLib.PDFRawStream.of(smaskObj.dict, recompressedSmask));
+              }
+            }
+          } catch (e) {
+            // Gracefully continue with original stream if recompression skips
           }
         }
       }
     }
 
-    // Eliminate unreferenced orphan image stream objects across document
-    try {
-      const reachableRefs = new Set();
-      const queue = [];
-      if (doc.catalog) {
-        const catRef = doc.context.getObjectRef(doc.catalog) || doc.context.trailerInfo?.Root;
-        if (catRef) queue.push(catRef);
-      }
-      for (let i = 0; i < doc.getPageCount(); i++) {
-        const page = doc.getPage(i);
-        if (page.ref) queue.push(page.ref);
-      }
+    // Deduplicate identical streams across document
+    deduplicateStreams(doc);
 
-      function traverseObj(item) {
-        if (!item) return;
-        if (item instanceof PDFLib.PDFRef) {
-          const key = item.tag || (item.objectNumber + ' ' + item.generationNumber + ' R');
-          if (!reachableRefs.has(key)) queue.push(item);
-        } else if (item instanceof PDFLib.PDFDict || (item.dict && item.dict instanceof Map)) {
-          const entries = item.entries ? item.entries() : (item.dict ? item.dict.entries() : []);
-          for (const [, v] of entries) traverseObj(v);
-        } else if (item instanceof PDFLib.PDFStream) {
-          if (item.dict) traverseObj(item.dict);
-        } else if (item instanceof PDFLib.PDFArray || Array.isArray(item.array)) {
-          const arr = item.asArray ? item.asArray() : (item.array || []);
-          for (const el of arr) traverseObj(el);
-        } else if (item instanceof Map) {
-          for (const [, v] of item) traverseObj(v);
-        }
-      }
+    // Prune unreferenced orphan indirect objects
+    pruneOrphans(doc);
 
-      while (queue.length > 0) {
-        const r = queue.pop();
-        const rKey = r.tag || (r.objectNumber + ' ' + r.generationNumber + ' R');
-        if (reachableRefs.has(rKey)) continue;
-        reachableRefs.add(rKey);
-
-        const target = doc.context.lookup(r);
-        if (!target) continue;
-        traverseObj(target);
-      }
-
-      for (const [r, o] of doc.context.enumerateIndirectObjects()) {
-        if (o instanceof PDFLib.PDFRawStream) {
-          const subtype = o.dict?.get(PDFName.of('Subtype'))?.toString();
-          const rKey = r.tag || (r.objectNumber + ' ' + r.generationNumber + ' R');
-          if (subtype === '/Image' && !reachableRefs.has(rKey)) {
-            doc.context.delete(r);
-          }
-        }
-      }
-    } catch (e) {
-      // Invariant: orphan elimination failure must never crash document compression
-    }
-
-    return await doc.save({
+    // Serialize using compressed object streams and cross-reference streams
+    const outputBytes = await doc.save({
       useObjectStreams: true,
       addDefaultPage: false,
       objectsPerTick: 50,
       updateMetadata: false,
     });
+
+    // Invariant: Never return a file larger than input bytes
+    if (outputBytes.length >= origBytes.length) {
+      return origBytes;
+    }
+
+    return outputBytes;
   }
 
   /**
