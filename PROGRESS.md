@@ -3,9 +3,9 @@
 | Phase & Task | Owner Agent | Status | Last Commit | Last Verification Output |
 | :--- | :--- | :--- | :--- | :--- |
 | Phase 0: Foundations | | | | |
-| 0.1 Benchmark corpus and harness | Engineer Corpus & Bench | VERIFIED | pending push | node bench/run.js: 17 benchmarks, 100% QPDF & PDFium PASS, neg control: exit 1 |
-| 0.2 Worker architecture | Engineer Workers/Platform | NOT STARTED | - | - |
-| 0.3 Cross-browser matrix | Engineer Browser Matrix | NOT STARTED | - | - |
+| 0.1 Benchmark corpus and harness | Engineer Corpus & Bench | VERIFIED | 3fa3a86 | node bench/run.js: 17 benchmarks, 100% QPDF & PDFium PASS, neg control: exit 1 |
+| 0.2 Worker architecture | Worker Platform Engineer | VERIFIED | c986f18 | node test/test_worker_architecture.js: 7 suites, 94 assertions PASS, npm test (30 suites, 1249 assertions) PASS |
+| 0.3 Cross-browser matrix | Browser Matrix Engineer | VERIFIED | 1d6f7f0 | npm run test:browser: Chromium, Firefox, WebKit, Pixel 7 PASS (84 assertions, 0 skips) |
 | Phase 1: Core Tools at iLovePDF Quality | | | | |
 | 1.1 Compress | Engineer Compress | PENDING PHASE 0 | - | - |
 | 1.2 Hardening | Engineer Tool Hardening | PENDING PHASE 0 | - | - |

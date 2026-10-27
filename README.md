@@ -6,6 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Privacy: 100% Local](https://img.shields.io/badge/privacy-100%25%20local-emerald.svg)](#-100-in-browser-privacy)
 [![Tests: 132+ Passing](https://img.shields.io/badge/tests-132%2B%20passing-brightgreen.svg)](#-automated-verification-suite)
+[![Benchmarks: 17/17 Passed](https://img.shields.io/badge/benchmarks-17%2F17%20passed-brightgreen.svg)](#-benchmark-corpus--multi-reader-validation-phase-0)
 [![Audit Remediation: Verified](https://img.shields.io/badge/audit-remediated%20%26%20verified-blueviolet.svg)](#-audit-remediation--hardening-architecture)
 
 🌐 **Live Studio**: [https://vedantexists.github.io/pdf-studio/](https://vedantexists.github.io/pdf-studio/)
@@ -183,14 +184,28 @@ npm run test:audit     # Forensic audit and E2E acceptance traps
 npm run test:security  # Adversarial security, redaction, and cipher suites
 ```
 
+### 📊 Benchmark Corpus & Multi-Reader Validation (Phase 0)
+Run the 17-task benchmark harness across the 25-file standardized test corpus (`bench/corpus/`):
+```bash
+node bench/run.js
+```
+- **25 Standardized Corpus Fixtures**: Synthesized via `bench/generate_corpus.js` covering large page counts (220 pages), non-Latin typography (CJK, Cyrillic, Greek, Arabic), interactive AcroForms, extreme dimensions (A0 to 72x72 pt), encrypted documents, scan binarization, and vector alpha transparency.
+- **Dual External Reader Validation**: Every output file is verified through both **QPDF** (`qpdf --check --warning-exit-0`) and **PDFium** (`pypdfium2`).
+- **100% Passing Benchmark**: Verified 17/17 tasks passing QPDF and PDFium validation with zero structural corruption and full text preservation.
+- **Negative Control Guard**: Verified via negative control tests that corrupt/malformed PDFs trigger an exit status of 1.
+- **iLovePDF Manual Comparison Protocol**: Standardized evaluation protocol in `bench/ilovepdf_manual.md` for head-to-head manual quality tracking.
+- Detailed technical specifications and results in [docs/PHASE0_FOUNDATIONS.md](docs/PHASE0_FOUNDATIONS.md) and [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+
 ---
 
 ## Repository Structure & Developer Notes
 - `pdf_core.js`: Pure PDF manipulation logic powered by `pdf-lib` and WebCrypto.
-- `app.js`: Application controller, drag-and-drop intake, mobile touch reordering, and thumbnail rendering via `pdfjs-dist`.
-- `index.html` / `style.css`: Responsive dashboard grid, mega-menu navigation, and mobile touch reorder layout.
-- `vendor/`: Self-contained vendor libraries (`pdf-lib.min.js`, `jszip.min.js`, `pdf.min.js`, `pdf.worker.min.js`, `pdf-lib-encrypt.js`).
-- `test/`: Comprehensive test suites validating core features, security, compression, mobile layout contracts, and zero egress.
+- `app.js`: Presentation controller, drag-and-drop intake, mobile touch reordering, and thumbnail rendering via `pdfjs-dist`.
+- `index.html` / `style.css`: Responsive dashboard grid, 6-column mega-menu navigation, and mobile touch reorder layout.
+- `vendor/`: Self-contained vendor libraries (`pdf-lib.min.js`, `jszip.min.js`, `pdf.min.js`, `pdf.worker.min.js`, bundled Tesseract WASM, and self-hosted WOFF2 fonts).
+- `test/`: Comprehensive dynamic test runner and test suites validating core features, security redlines, compression, and zero egress.
+- `bench/`: Standardized 25-file benchmark corpus (`bench/corpus/`), corpus generator (`generate_corpus.js`), dual QPDF/PDFium runner (`run.js`), results ledger (`benchmark_results.md`), and iLovePDF comparison guide (`ilovepdf_manual.md`).
+- `docs/`: Technical specifications, architectural foundations, and verification documentation.
 
 ---
 
